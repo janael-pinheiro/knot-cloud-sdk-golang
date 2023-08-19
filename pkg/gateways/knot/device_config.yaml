@@ -1,0 +1,63 @@
+0d7cd9d221385e1a:
+  id: 0d7cd9d221385e1a
+  token: "398b9a7b-c9d7-4290-be33-d4857b50e9e9"
+  name: test1
+  config:
+  - sensorId: 1
+    schema:
+      valueType: 2
+      unit: 1
+      typeId: 65296
+      name: dcsn_cntry
+    event:
+      change: true
+      timeSec: 30
+      lowerThreshold: null
+      upperThreshold: null
+  - sensorId: 2
+    schema:
+      valueType: 2
+      unit: 1
+      typeId: 65296
+      name: thy_cmpr
+    event:
+      change: true
+      timeSec: 30
+      lowerThreshold: null
+      upperThreshold: null
+  - sensorId: 3
+    schema:
+      valueType: 2
+      unit: 1
+      typeId: 65296
+      name: rcv
+    event:
+      change: true
+      timeSec: 30
+      lowerThreshold: null
+      upperThreshold: null
+  - sensorId: 4
+    schema:
+      valueType: 2
+      unit: 1
+      typeId: 65296
+      name: nc_sf
+    event:
+      change: true
+      timeSec: 30
+      lowerThreshold: null
+      upperThreshold: null
+  - sensorId: 5
+    schema:
+      valueType: 2
+      unit: 1
+      typeId: 65296
+      name: ndstry_scnd
+    event:
+      change: true
+      timeSec: 30
+      lowerThreshold: null
+      upperThreshold: null
+  state: new
+  data: []
+  error: ""
