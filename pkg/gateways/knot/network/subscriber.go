@@ -12,10 +12,10 @@ type Subscriber interface {
 }
 
 type msgSubscriber struct {
-	amqp *AMQP
+	amqp Messaging
 }
 
-func NewMsgSubscriber(amqp *AMQP) Subscriber {
+func NewMsgSubscriber(amqp Messaging) Subscriber {
 	return &msgSubscriber{amqp}
 }
 

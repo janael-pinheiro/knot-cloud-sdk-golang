@@ -1,95 +1,174 @@
 package network
 
 import (
+	"errors"
 	"testing"
 
+	"github.com/cenkalti/backoff"
+	"github.com/streadway/amqp"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
+func retryFunctionMock(o backoff.Operation, b backoff.BackOff) error { return nil }
+
+func dialFunctionMock(url string) (*amqp.Connection, error) {
+	return nil, nil
+}
+
+type connectionMock struct {
+	mock.Mock
+}
+
+type channelMock struct {
+	amqp.Channel
+}
+
+func (c *connectionMock) connect() error {
+	args := c.Called()
+	return args.Error(0)
+}
+
+func (c *connectionMock) createChannel() error {
+	args := c.Called()
+	return args.Error(0)
+}
+
+func (c *connectionMock) getChannel() *amqp.Channel {
+	c.Called()
+	return nil
+}
+
+func (c *connectionMock) queueDeclare(name string) error {
+	args := c.Called()
+	return args.Error(0)
+}
+
+func (c *connectionMock) exchangeDeclare(name, exchangeType string) error {
+	args := c.Called(name, exchangeType)
+	return args.Error(0)
+}
+
+func (c *connectionMock) queueBind(queueName, key, exchangeName string, noWait bool, table amqp.Table) error {
+	args := c.Called()
+	return args.Error(0)
+}
+
+func (c *connectionMock) consume(queue string, consumer string, autoAck bool, exclusive bool, noLocal bool, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error) {
+	return nil, nil
+}
+
+func (c *connectionMock) publish(exchange string, key string, mandatory bool, immediate bool, data interface{}, options *MessageOptions) error {
+	args := c.Called()
+	return args.Error(0)
+}
+
+func (c *connectionMock) isClosed() bool {
+	args := c.Called()
+	return args.Bool(0)
+}
+
+func (c *connectionMock) close() error {
+	args := c.Called()
+	return args.Error(0)
+}
+
+func (c *connectionMock) closeChannel() error {
+	args := c.Called()
+	return args.Error(0)
+}
+
+func (c *connectionMock) notifyClose(channel chan *amqp.Error) chan *amqp.Error {
+	return nil
+}
+
 func TestCreateAMQPConnection(t *testing.T) {
-	url := "amqp://knot:knot@127.0.0.1:5672"
-	amqp := NewAMQP(url)
+	connectionMock := new(connectionMock)
+	connectionMock.On("connect").Return(nil)
+	connectionMock.On("createChannel").Return(nil)
+	amqp := NewAMQPHandler(connectionMock)
 	err := amqp.Start()
 	assert.Nil(t, err)
 }
 
 func TestCloseAMQPConnection(t *testing.T) {
-	url := "amqp://knot:knot@127.0.0.1:5672"
-	amqp := NewAMQP(url)
-	err := amqp.Start()
-	assert.Nil(t, err)
-	assert.False(t, amqp.conn.IsClosed())
-	amqp.Stop()
-	assert.True(t, amqp.conn.IsClosed())
+	connectionMock := new(connectionMock)
+	amqp := NewAMQPHandler(connectionMock)
+	connectionMock.On("isClosed").Return(false)
+	connectionMock.On("close").Return(nil)
+	connectionMock.On("closeChannel").Return(nil)
+	err := amqp.Stop()
+	assert.NoError(t, err)
 }
 
 func TestConnect(t *testing.T) {
-	url := "amqp://knot:knot@127.0.0.1:5672"
-	amqp := NewAMQP(url)
-	err := amqp.connect()
+	connectionMock := new(connectionMock)
+	connectionMock.On("connect").Return(nil)
+	connectionMock.On("createChannel").Return(nil)
+	amqp := NewAMQPHandler(connectionMock)
+	err := amqp.Connect()
 	assert.Nil(t, err)
-	assert.NotNil(t, amqp.channel)
 }
 
 func TestConnectWhenInvalidURLThenReturnError(t *testing.T) {
-	url := ""
-	amqp := NewAMQP(url)
-	err := amqp.connect()
+	connectionMock := new(connectionMock)
+	expectedErrorMessage := "Invalid URL"
+	connectionMock.On("connect").Return(errors.New(expectedErrorMessage))
+	amqp := NewAMQPHandler(connectionMock)
+	err := amqp.Connect()
 	assert.NotNil(t, err)
-	assert.Nil(t, amqp.channel)
+	assert.Equal(t, expectedErrorMessage, err.Error())
+}
+
+func TestDeclareQueue(t *testing.T) {
+	connectionMock := new(connectionMock)
+	connectionMock.On("queueDeclare").Return(nil)
+	amqp := NewAMQPHandler(connectionMock)
+	testQueueName := "test"
+	err := amqp.DeclareQueue(testQueueName)
+	assert.Nil(t, err)
 }
 
 func TestDeclareExchange(t *testing.T) {
-	url := "amqp://knot:knot@127.0.0.1:5672"
-	amqp := NewAMQP(url)
-	err := amqp.Start()
-	assert.Nil(t, err)
+	connectionMock := new(connectionMock)
 	testExchangeName := "test"
 	testExchangeType := "fanout"
-	err = amqp.declareExchange(testExchangeName, testExchangeType)
+	connectionMock.On("exchangeDeclare", testExchangeName, testExchangeType).Return(nil)
+	amqp := NewAMQPHandler(connectionMock)
+	err := amqp.DeclareExchange(testExchangeName, testExchangeType)
 	assert.Nil(t, err)
 }
 
 func TestDeclareExchangeWhenInvalidExchangeTypeReturnError(t *testing.T) {
-	url := "amqp://knot:knot@127.0.0.1:5672"
-	amqp := NewAMQP(url)
-	err := amqp.Start()
-	assert.Nil(t, err)
+	connectionMock := new(connectionMock)
 	testExchangeName := "test"
-	testExchangeType := ""
-	err = amqp.declareExchange(testExchangeName, testExchangeType)
+	testExchangeType := "invalid"
+	expectedErrorMessage := "Invalid exchange type"
+	connectionMock.On("exchangeDeclare", testExchangeName, testExchangeType).Return(errors.New(expectedErrorMessage))
+	amqp := NewAMQPHandler(connectionMock)
+	err := amqp.DeclareExchange(testExchangeName, testExchangeType)
 	assert.NotNil(t, err)
-}
-
-func TestDeclareQueue(t *testing.T) {
-	url := "amqp://knot:knot@127.0.0.1:5672"
-	amqp := NewAMQP(url)
-	err := amqp.Start()
-	assert.Nil(t, err)
-	testQueueName := "test"
-	err = amqp.declareQueue(testQueueName)
-	assert.Nil(t, err)
+	assert.Equal(t, expectedErrorMessage, err.Error())
 }
 
 func TestOnMessage(t *testing.T) {
-	url := "amqp://knot:knot@127.0.0.1:5672"
-	amqp := NewAMQP(url)
-	err := amqp.Start()
-	assert.Nil(t, err)
+	connectionMock := new(connectionMock)
+	amqp := NewAMQPHandler(connectionMock)
 	msgChan := make(chan InMsg)
 	testExchangeName := "test"
 	testExchangeType := "fanout"
 	testQueueName := "test"
 	testKey := ""
-	err = amqp.OnMessage(msgChan, testQueueName, testExchangeName, testExchangeType, testKey)
+	connectionMock.On("exchangeDeclare", testExchangeName, testExchangeType).Return(nil)
+	connectionMock.On("queueDeclare").Return(nil)
+	connectionMock.On("queueBind").Return(nil)
+	err := amqp.OnMessage(msgChan, testQueueName, testExchangeName, testExchangeType, testKey)
 	assert.Nil(t, err)
 }
 
 func TestPublishPersistentMessage(t *testing.T) {
-	url := "amqp://knot:knot@127.0.0.1:5672"
-	amqp := NewAMQP(url)
-	err := amqp.Start()
-	assert.Nil(t, err)
+	connectionMock := new(connectionMock)
+	amqp := NewAMQPHandler(connectionMock)
 	testExchangeName := "test"
 	testExchangeType := "fanout"
 	testKey := ""
@@ -102,5 +181,8 @@ func TestPublishPersistentMessage(t *testing.T) {
 		ID:   "",
 		Name: "",
 	}
-	err = amqp.PublishPersistentMessage(testExchangeName, testExchangeType, testKey, message, &options)
+	connectionMock.On("exchangeDeclare", testExchangeName, testExchangeType).Return(nil)
+	connectionMock.On("publish").Return(nil)
+	err := amqp.PublishPersistentMessage(testExchangeName, testExchangeType, testKey, message, &options)
+	assert.NoError(t, err)
 }

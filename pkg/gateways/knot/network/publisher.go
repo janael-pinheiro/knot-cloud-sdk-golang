@@ -22,10 +22,10 @@ type Publisher interface {
 }
 
 type msgPublisher struct {
-	amqp *AMQP
+	amqp Messaging
 }
 
-func NewMsgPublisher(amqp *AMQP) Publisher {
+func NewMsgPublisher(amqp Messaging) Publisher {
 	return &msgPublisher{amqp}
 }
 

@@ -3,6 +3,7 @@ package knot
 import (
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -30,15 +31,16 @@ type Protocol interface {
 	writeDevicesConfigFile(device entities.Device) error
 }
 type networkWrapper struct {
-	amqp       *network.AMQP
+	amqp       network.Messaging
 	publisher  network.Publisher
 	subscriber network.Subscriber
 }
 
 type protocol struct {
-	userToken string
-	network   *networkWrapper
-	devices   map[string]entities.Device
+	userToken      string
+	network        *networkWrapper
+	devices        map[string]entities.Device
+	fileManagement filesystemManagement
 }
 
 const (
@@ -68,7 +70,7 @@ func bindingKeyRegistered(message network.InMsg, deviceChan chan entities.Device
 	device := handlerAMQPmessage(message, log)
 
 	if device.Error == "" {
-		log.Println("received a registration response with no error")
+		log.Println("received a registration response with success")
 		device.State = entities.KnotRegistered
 		deviceChan <- device
 		return
@@ -98,7 +100,7 @@ func replyToAuthMessages(message network.InMsg, deviceChan chan entities.Device,
 		device.State = entities.KnotForceDelete
 		deviceChan <- device
 	} else {
-		log.Println("received a authentication response with no error")
+		log.Println("received a authentication response with success")
 		device.State = entities.KnotAuth
 		deviceChan <- device
 
@@ -113,29 +115,23 @@ func bindingKeyUpdatedConfig(message network.InMsg, deviceChan chan entities.Dev
 		log.Println("received a config update response with a error")
 		deviceChan <- errorFormat(device, device.Error)
 	} else {
-		log.Println("received a config update response with no error")
+		log.Println("received a config update response with success")
 		device.State = entities.KnotReady
 		deviceChan <- device
 	}
 }
 
-func newProtocol(pipeDevices chan map[string]entities.Device, conf entities.IntegrationKNoTConfig, deviceChan chan entities.Device, msgChan chan network.InMsg, log *logrus.Entry, devices map[string]entities.Device) (Protocol, error) {
+func newProtocol(pipeDevices chan map[string]entities.Device, conf entities.IntegrationKNoTConfig, deviceChan chan entities.Device, msgChan chan network.InMsg, log *logrus.Entry, devices map[string]entities.Device, publisher network.Publisher, subscriber network.Subscriber, amqp network.Messaging, fileManagement filesystemManagement) (Protocol, error) {
 	p := &protocol{}
 
+	p.fileManagement = fileManagement
 	p.userToken = conf.UserToken
 	p.network = new(networkWrapper)
-	p.network.amqp = network.NewAMQP(conf.URL)
-	err := p.network.amqp.Start()
-	if err != nil {
-		log.Println("Knot connection error")
-		return p, err
-	} else {
-		log.Println("Knot connected")
-	}
-	p.network.publisher = network.NewMsgPublisher(p.network.amqp)
-	p.network.subscriber = network.NewMsgSubscriber(p.network.amqp)
+	p.network.amqp = amqp
+	p.network.publisher = publisher
+	p.network.subscriber = subscriber
 
-	if err = p.network.subscriber.SubscribeToKNoTMessages(msgChan); err != nil {
+	if err := p.network.subscriber.SubscribeToKNoTMessages(msgChan); err != nil {
 		log.Errorln("Error to subscribe")
 		return p, err
 	}
@@ -152,8 +148,8 @@ func newProtocol(pipeDevices chan map[string]entities.Device, conf entities.Inte
 // Check for data to be updated
 func (p *protocol) checkData(device entities.Device) error {
 
-	if device.Data == nil {
-		return nil
+	if device.Data == nil || len(device.Data) == 0 {
+		return errors.New("Invalid data")
 	}
 
 	sliceSize := len(device.Data)
@@ -306,7 +302,7 @@ func (p *protocol) writeDevicesConfigFile(device entities.Device) error {
 		return err
 	}
 
-	err = os.WriteFile(os.Getenv("DEVICE_CONFIG_FILEPATH"), data, 0600)
+	err = p.fileManagement.writeDevicesConfigFile(os.Getenv("DEVICE_CONFIG_FILEPATH"), data) //os.WriteFile(os.Getenv("DEVICE_CONFIG_FILEPATH"), data, 0600)
 	if err != nil {
 		log.Panic(err)
 	}
@@ -316,8 +312,7 @@ func (p *protocol) writeDevicesConfigFile(device entities.Device) error {
 }
 
 func (p *protocol) Close() error {
-	p.network.amqp.Stop()
-	return nil
+	return p.network.amqp.Stop()
 }
 
 func (p *protocol) createDevice(device entities.Device) error {
@@ -433,21 +428,11 @@ func (p *protocol) requestsKnot(deviceChan chan entities.Device, device entities
 			states[entities.KnotNew] = p.network.publisher.PublishDeviceRegister
 			states[entities.KnotRegistered] = p.network.publisher.PublishDeviceAuth
 			states[entities.KnotAuth] = p.network.publisher.PublishDeviceUpdateConfig
-			log.Println(message)
 			if function, ok := states[oldState]; ok {
-				function(p.userToken, &device)
+				err = function(p.userToken, &device)
 			}
-			/*
-				switch oldState {
-				case entities.KnotNew:
-					err = p.network.publisher.PublishDeviceRegister(p.userToken, &device)
-				case entities.KnotRegistered:
-					err = p.network.publisher.PublishDeviceAuth(p.userToken, &device)
-				case entities.KnotAuth:
-					err = p.network.publisher.PublishDeviceUpdateConfig(p.userToken, &device)
-				}
-			*/
 			verifyErrors(err, log)
+			log.Println(message)
 		}
 	}
 }
@@ -464,8 +449,9 @@ func knotStateMachineHandler(pipeDevices chan map[string]entities.Device, device
 				if err != nil {
 					device.State = entities.KnotOff
 					log.Error(err)
+				} else {
+					log.Println("Generated device id")
 				}
-
 			} else if device.Error != errorTimeoutMessage {
 				log.Error("device id received does not match the stored")
 			}
@@ -481,9 +467,7 @@ func knotStateMachineHandler(pipeDevices chan map[string]entities.Device, device
 				if device.Name == "" {
 					log.Fatalln("Device has no name")
 				} else if device.State == entities.KnotNew && device.Token != "" {
-					//if device.Token != "" {
 					device.State = entities.KnotRegistered
-					//}
 				}
 			} else if device.Error == errorTimeoutMessage {
 				device.Error = ""
@@ -524,6 +508,7 @@ func knotStateMachineHandler(pipeDevices chan map[string]entities.Device, device
 					if err != nil {
 						log.Errorln(err)
 					} else {
+						log.Println("Published data")
 						device.Data = nil
 						knotMutex.Lock()
 						err = p.updateDevice(device)
@@ -570,7 +555,6 @@ func knotStateMachineHandler(pipeDevices chan map[string]entities.Device, device
 			case entities.KnotError:
 				log.Println("ERROR: ")
 				switch device.Error {
-				// If the device is new to the chirpstack platform, but already has a registration in Knot, first the device needs to ask to unregister and then ask for a registration.
 				case "thing's config not provided":
 					log.Println("thing's config not provided")
 

@@ -2,6 +2,7 @@ package knot
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -9,23 +10,34 @@ import (
 
 	"github.com/janael-pinheiro/knot_go_sdk/pkg/entities"
 	"github.com/janael-pinheiro/knot_go_sdk/pkg/gateways/knot/network"
+	"github.com/janael-pinheiro/knot_go_sdk/pkg/gateways/knot/network/mocks"
 	"github.com/janael-pinheiro/knot_go_sdk/pkg/logging"
-	"github.com/janael-pinheiro/knot_go_sdk/pkg/utils"
 	"github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 )
 
-func loadConfiguration() (map[string]entities.Device, entities.IntegrationKNoTConfig) {
-	deviceConfiguration, err := utils.ConfigurationParser("device_config.yaml", make(map[string]entities.Device))
-	if err != nil {
-		panic(err)
-	}
+const deviceID = "0d7cd9d221385e1a"
 
-	knotConfiguration, err := utils.ConfigurationParser("knot_setup.yaml", entities.IntegrationKNoTConfig{})
-	if err != nil {
-		panic(err)
-	}
+func loadConfiguration() (map[string]entities.Device, entities.IntegrationKNoTConfig) {
+	var deviceConfiguration map[string]entities.Device = make(map[string]entities.Device)
+	var schema entities.Schema = entities.Schema{ValueType: 2, Unit: 1, TypeID: 65296, Name: "dcsn_cntry"}
+	var event entities.Event = entities.Event{Change: true, TimeSec: 30, LowerThreshold: nil, UpperThreshold: nil}
+	var config entities.Config = entities.Config{SensorID: 1, Schema: schema, Event: event}
+	device := new(entities.Device)
+	device.ID = deviceID
+	device.Token = "398b9a7b-c9d7-4290-be33-d4857b50e9e9"
+	device.Name = "test1"
+	device.Config = append(device.Config, config)
+	device.State = entities.KnotNew
+	device.Data = make([]entities.Data, 1)
+	device.Error = ""
+	deviceConfiguration[deviceID] = *device
+
+	knotConfiguration := entities.IntegrationKNoTConfig{
+		URL:       "amqp://knot:knot@192.168.1.9:5672",
+		UserToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MjI4Nzg0MzEsImp0aSI6Ijc4MDhhYzBkLTRhMDEtNGRkNS04ZmU5LTUyODIzODFmYmMzYSIsImlhdCI6MTY5MTM0MjQzMSwiaXNzIjoicmVzdEBnbWFpbC5jb20iLCJ0eXBlIjoyfQ.rFsPdLNdUreJwVz49QZDWZRg53RqndrHijZ9iVfS1t4"}
 
 	return deviceConfiguration, knotConfiguration
 }
@@ -72,164 +84,140 @@ func createConfig(sensorID int) entities.Config {
 
 }
 
-func TestGivenEmptyStateThenCreateDevice(t *testing.T) {
-
-	fakeDevice := setUp()
-	newProtocol := protocol{
-		devices: make(map[string]entities.Device),
-	}
-	err := newProtocol.createDevice(fakeDevice)
-
-	assert.NoError(t, err)
+type newProtocolSuite struct {
+	suite.Suite
+	err        error
+	protocol   protocol
+	fakeDevice entities.Device
 }
 
-func TestGivenEmptyStateThenCreateDeviceWithKnotNewState(t *testing.T) {
-
-	fakeDevice := setUp()
-	newProtocol := protocol{
+func (protocolSuite *newProtocolSuite) SetupTest() {
+	protocolSuite.fakeDevice = setUp()
+	protocolSuite.protocol = protocol{
 		devices: make(map[string]entities.Device),
 	}
-	err := newProtocol.createDevice(fakeDevice)
-
-	assert.NoError(t, err)
-	assert.Equal(t, newProtocol.devices[fakeDevice.ID].State, entities.KnotNew)
+	protocolSuite.err = protocolSuite.protocol.createDevice(protocolSuite.fakeDevice)
+	assert.NoError(protocolSuite.T(), protocolSuite.err)
 }
 
-func TestGivenNonEmptyStateThenFailToCreateDevice(t *testing.T) {
-
-	fakeDevice := setUp()
-	fakeDevice.State = "invalid"
-	newProtocol := protocol{
-		devices: make(map[string]entities.Device),
-	}
-	err := newProtocol.createDevice(fakeDevice)
-	assert.Error(t, err)
+func (protocolSuite *newProtocolSuite) TestGivenEmptyStateThenCreateDeviceWithKnotNewState() {
+	assert.Equal(protocolSuite.T(), protocolSuite.protocol.devices[protocolSuite.fakeDevice.ID].State, entities.KnotNew)
 }
 
-func TestGivenExistingDeviceThenTrue(t *testing.T) {
-	fakeDevice := setUp()
-	fakeDevice.State = ""
-	newProtocol := protocol{
-		devices: make(map[string]entities.Device),
-	}
-	newProtocol.devices[fakeDevice.ID] = fakeDevice
-	foundDevice := newProtocol.deviceExists(newProtocol.devices[fakeDevice.ID])
-	assert.Equal(t, foundDevice, true)
+func (protocolSuite *newProtocolSuite) TestGivenNonEmptyStateThenFailToCreateDevice() {
+	protocolSuite.fakeDevice.State = "invalid"
+	err := protocolSuite.protocol.createDevice(protocolSuite.fakeDevice)
+	assert.Error(protocolSuite.T(), err)
 }
 
-func TestGivenNotExistingDeviceThenFalse(t *testing.T) {
-	fakeDevice := setUp()
-	newProtocol := protocol{
-		devices: make(map[string]entities.Device),
-	}
-	foundDevice := newProtocol.deviceExists(newProtocol.devices[fakeDevice.ID])
-	assert.Equal(t, foundDevice, false)
+func (protocolSuite *newProtocolSuite) TestGivenExistingDeviceThenTrue() {
+	protocolSuite.fakeDevice.State = ""
+	protocolSuite.protocol.devices[protocolSuite.fakeDevice.ID] = protocolSuite.fakeDevice
+	foundDevice := protocolSuite.protocol.deviceExists(protocolSuite.protocol.devices[protocolSuite.fakeDevice.ID])
+	assert.Equal(protocolSuite.T(), foundDevice, true)
 }
 
-func TestGivenValidDataThenSucess(t *testing.T) {
-	fakeDevice := setUp()
+func (protocolSuite *newProtocolSuite) TestGivenNotExistingDeviceThenFalse() {
+	const invalidID = "42"
+	foundDevice := protocolSuite.protocol.deviceExists(protocolSuite.protocol.devices[invalidID])
+	assert.Equal(protocolSuite.T(), foundDevice, false)
+}
+
+func (protocolSuite *newProtocolSuite) TestGivenValidDataThenSucess() {
 	var fakeData []entities.Data
 	for i := 1; i <= 10; i++ {
 		fakeData = append(fakeData, createData(i))
 	}
-
-	fakeDevice.Data = fakeData
-
-	newProtocol := protocol{
-		devices: make(map[string]entities.Device),
-	}
-
-	err := newProtocol.checkData(fakeDevice)
-
-	assert.NoError(t, err)
+	protocolSuite.fakeDevice.Data = fakeData
+	err := protocolSuite.protocol.checkData(protocolSuite.fakeDevice)
+	assert.NoError(protocolSuite.T(), err)
 }
 
-func TestGivenInvalidDataThenError(t *testing.T) {
+func (protocolSuite *newProtocolSuite) TestGivenInvalidDataThenError() {
 	/*
 		invalid starts with sensorID as 0. Why? I do not know.
 	*/
-	fakeDevice := setUp()
 	var fakeData []entities.Data
 	for i := 0; i < 2; i++ {
 		fakeData = append(fakeData, createData(1))
 	}
-	fakeDevice.Data = fakeData
-	newProtocol := protocol{
-		devices: make(map[string]entities.Device),
-	}
-	err := newProtocol.checkData(fakeDevice)
-	assert.Error(t, err)
+	protocolSuite.fakeDevice.Data = fakeData
+	err := protocolSuite.protocol.checkData(protocolSuite.fakeDevice)
+	assert.Error(protocolSuite.T(), err)
 }
 
-func TestGivenInvalidTimestampDataThenError(t *testing.T) {
-	fakeDevice := setUp()
+func (protocolSuite *newProtocolSuite) TestGivenInvalidTimestampDataThenError() {
 	var fakeData []entities.Data
 	for i := 1; i <= 10; i++ {
 		fakeData = append(fakeData, createDataWithEmptyTimestamp(i))
 	}
-	fakeDevice.Data = fakeData
-	newProtocol := protocol{
-		devices: make(map[string]entities.Device),
-	}
-	err := newProtocol.checkData(fakeDevice)
-	assert.Error(t, err)
+	protocolSuite.fakeDevice.Data = fakeData
+	err := protocolSuite.protocol.checkData(protocolSuite.fakeDevice)
+	assert.Error(protocolSuite.T(), err)
 }
 
-func TestGivenInvalidValueDataThenError(t *testing.T) {
-	fakeDevice := setUp()
+func (protocolSuite *newProtocolSuite) TestGivenInvalidValueDataThenError() {
 	var fakeData []entities.Data
 	for i := 1; i <= 10; i++ {
 		fakeData = append(fakeData, createDataWithInvalidValue(i))
 	}
-	fakeDevice.Data = fakeData
-	newProtocol := protocol{
-		devices: make(map[string]entities.Device),
-	}
-	err := newProtocol.checkData(fakeDevice)
-	assert.Error(t, err)
+	protocolSuite.fakeDevice.Data = fakeData
+	err := protocolSuite.protocol.checkData(protocolSuite.fakeDevice)
+	assert.Error(protocolSuite.T(), err)
 }
 
-func TestGivenValidConfigThenSucess(t *testing.T) {
-	fakeDevice := setUp()
+func (protocolSuite *newProtocolSuite) TestGivenValidConfigThenSucess() {
 	var fakeConfig []entities.Config
 	for i := 1; i <= 10; i++ {
 		fakeConfig = append(fakeConfig, createConfig(i))
 	}
+	protocolSuite.fakeDevice.Config = fakeConfig
 
-	fakeDevice.Config = fakeConfig
-
-	newProtocol := protocol{
-		devices: make(map[string]entities.Device),
-	}
-	err := newProtocol.checkDeviceConfiguration(fakeDevice)
-	assert.NoError(t, err)
+	err := protocolSuite.protocol.checkDeviceConfiguration(protocolSuite.fakeDevice)
+	assert.NoError(protocolSuite.T(), err)
 }
 
-func TestGivenInvalidConfigThenError(t *testing.T) {
-	fakeDevice := setUp()
+func (protocolSuite *newProtocolSuite) TestGivenInvalidConfigThenError() {
 	var fakeConfig []entities.Config
 	repeatedIdentifier := 0
 	for i := 0; i < 10; i++ {
 		fakeConfig = append(fakeConfig, createConfig(repeatedIdentifier))
 	}
-	fakeDevice.Config = fakeConfig
-	newProtocol := protocol{
-		devices: make(map[string]entities.Device),
-	}
-	err := newProtocol.checkDeviceConfiguration(fakeDevice)
-
-	assert.Error(t, err)
+	protocolSuite.fakeDevice.Config = fakeConfig
+	err := protocolSuite.protocol.checkDeviceConfiguration(protocolSuite.fakeDevice)
+	assert.Error(protocolSuite.T(), err)
 }
 
-func TestGivenNoConfigThenError(t *testing.T) {
-	fakeDevice := setUp()
-	fakeDevice.Config = nil
-	newProtocol := protocol{
-		devices: make(map[string]entities.Device),
+func (protocolSuite *newProtocolSuite) TestGivenInvalidValueTypeConfigThenError() {
+	var fakeConfig []entities.Config
+	for i := 0; i < 10; i++ {
+		config := createConfig(i)
+		config.Schema.ValueType = 10
+		fakeConfig = append(fakeConfig, config)
 	}
-	err := newProtocol.checkDeviceConfiguration(fakeDevice)
+	protocolSuite.fakeDevice.Config = fakeConfig
+	err := protocolSuite.protocol.checkDeviceConfiguration(protocolSuite.fakeDevice)
+	assert.ErrorContains(protocolSuite.T(), err, "invalid sensor id")
+}
 
-	assert.Error(t, err)
+func (protocolSuite *newProtocolSuite) TestGivenNoConfigThenError() {
+	protocolSuite.fakeDevice.Config = nil
+	err := protocolSuite.protocol.checkDeviceConfiguration(protocolSuite.fakeDevice)
+	assert.Error(protocolSuite.T(), err)
+}
+
+func (protocolSuite *newProtocolSuite) TestGivenValidDeviceIDThenDeleteIt() {
+	err := protocolSuite.protocol.deleteDevice(protocolSuite.fakeDevice.ID)
+	assert.NoError(protocolSuite.T(), err)
+}
+
+func (protocolSuite *newProtocolSuite) TestGivenInvalidDeviceIDThenError() {
+	err := protocolSuite.protocol.deleteDevice("fakeID")
+	assert.Error(protocolSuite.T(), err)
+}
+
+func TestNewProtocolSuite(t *testing.T) {
+	suite.Run(t, new(newProtocolSuite))
 }
 
 func TestTokenIDGenerator(t *testing.T) {
@@ -237,32 +225,6 @@ func TestTokenIDGenerator(t *testing.T) {
 	_, err := tokenIDGenerator()
 
 	assert.NoError(t, err)
-}
-
-func TestGivenValidDeviceIDThenDeleteIt(t *testing.T) {
-	fakeDevice := setUp()
-
-	newProtocol := protocol{
-		devices: make(map[string]entities.Device),
-	}
-
-	newProtocol.devices[fakeDevice.ID] = fakeDevice
-
-	err := newProtocol.deleteDevice(fakeDevice.ID)
-
-	assert.NoError(t, err)
-}
-
-func TestGivenInvalidDeviceIDThenError(t *testing.T) {
-	fakeDevice := setUp()
-
-	newProtocol := protocol{
-		devices: make(map[string]entities.Device),
-	}
-
-	err := newProtocol.deleteDevice(fakeDevice.ID)
-
-	assert.Error(t, err)
 }
 
 func sendDeviceToChannel(device entities.Device, channel chan entities.Device) {
@@ -291,7 +253,6 @@ func createNullLogger() (*logrus.Entry, *test.Hook) {
 }
 
 func TestGivenInvalidConfigTimeout(t *testing.T) {
-
 	conf := entities.IntegrationKNoTConfig{
 		UserToken:               "",
 		URL:                     "",
@@ -303,7 +264,13 @@ func TestGivenInvalidConfigTimeout(t *testing.T) {
 	msgChan := make(chan network.InMsg)
 	var err error
 	go func() {
-		_, err = newProtocol(pipeDevices, conf, deviceChan, msgChan, logger, devices)
+		publisherMock := new(mocks.PublisherMock)
+		subscriberMock := new(mocks.SubscriberMock)
+		amqpMock := new(network.AmqpMock)
+		subscriberMock.On("SubscribeToKNoTMessages", msgChan).Return(nil)
+		fileManagementMock := new(fileManagementMock)
+		fileManagementMock.On("writeDevicesConfigFile").Return(nil)
+		_, err = newProtocol(pipeDevices, conf, deviceChan, msgChan, logger, devices, publisherMock, subscriberMock, amqpMock, fileManagementMock)
 	}()
 
 	timeout := time.Second * 30
@@ -316,87 +283,76 @@ func TestGivenInvalidConfigTimeout(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestGivenDeviceWithoutTimeoutCheckTimeout(t *testing.T) {
-
-	deviceConfiguration, knotConfiguration := loadConfiguration()
-	pipeDevices, deviceChan := createChannels()
-	logger := createLogger()
-	msgChan := make(chan network.InMsg)
-	knotProtocol, _ := newProtocol(pipeDevices, knotConfiguration, deviceChan, msgChan, logger, deviceConfiguration)
-	device := deviceConfiguration["2801d924dcf1fc52"]
-	device.Error = ""
-	deviceWithCheckedTimeout := knotProtocol.checkTimeout(device, logger)
-	assert.Equal(t, deviceWithCheckedTimeout.Error, device.Error)
+type deviceTimeoutSuite struct {
+	suite.Suite
+	device              entities.Device
+	protocol            Protocol
+	logger              *logrus.Entry
+	hook                *test.Hook
+	deviceConfiguration map[string]entities.Device
 }
 
-func TestGivenDeviceTimeoutCheckTimeoutStateNewWaitReg(t *testing.T) {
-
+func (deviceSuite *deviceTimeoutSuite) SetupTest() {
 	deviceConfiguration, knotConfiguration := loadConfiguration()
-	oldDevice := deviceConfiguration["2801d924dcf1fc52"]
+	deviceSuite.deviceConfiguration = deviceConfiguration
+	pipeDevices, deviceChan := createChannels()
+	deviceSuite.logger, deviceSuite.hook = createNullLogger()
+	msgChan := make(chan network.InMsg)
+	publisherMock := new(mocks.PublisherMock)
+	subscriberMock := new(mocks.SubscriberMock)
+	amqpMock := new(network.AmqpMock)
+	subscriberMock.On("SubscribeToKNoTMessages", msgChan).Return(nil)
+	fileManagementMock := new(fileManagementMock)
+	fileManagementMock.On("writeDevicesConfigFile").Return(nil)
+	deviceSuite.protocol, _ = newProtocol(pipeDevices, knotConfiguration, deviceChan, msgChan, deviceSuite.logger, deviceConfiguration, publisherMock, subscriberMock, amqpMock, fileManagementMock)
+	deviceSuite.device = deviceConfiguration["2801d924dcf1fc52"]
+	deviceSuite.device.Error = errorTimeoutMessage
+}
+
+func (deviceSuite *deviceTimeoutSuite) TestGivenDeviceWithoutTimeoutCheckTimeout() {
+	deviceSuite.device.Error = ""
+	deviceWithCheckedTimeout := deviceSuite.protocol.checkTimeout(deviceSuite.device, deviceSuite.logger)
+	assert.Equal(deviceSuite.T(), deviceWithCheckedTimeout.Error, deviceSuite.device.Error)
+}
+
+func (deviceSuite *deviceTimeoutSuite) TestGivenDeviceTimeoutCheckTimeoutStateNewWaitReg() {
+	oldDevice := deviceSuite.device
 	oldDevice.State = entities.KnotWaitReg
-	deviceConfiguration[oldDevice.ID] = oldDevice
-	pipeDevices, deviceChan := createChannels()
-	logger, hook := createNullLogger()
-	msgChan := make(chan network.InMsg)
-	knotProtocol, _ := newProtocol(pipeDevices, knotConfiguration, deviceChan, msgChan, logger, deviceConfiguration)
-	device := deviceConfiguration["2801d924dcf1fc52"]
-	device.Error = "timeOut"
-	device.State = entities.KnotNew
-	_ = knotProtocol.checkTimeout(device, logger)
+	deviceSuite.deviceConfiguration[oldDevice.ID] = oldDevice
+	deviceSuite.device.State = entities.KnotNew
+	_ = deviceSuite.protocol.checkTimeout(deviceSuite.device, deviceSuite.logger)
 	expectedErrorMessage := "error: timeOut"
-	assert.Equal(t, hook.LastEntry().Message, expectedErrorMessage)
+	assert.Equal(deviceSuite.T(), deviceSuite.hook.LastEntry().Message, expectedErrorMessage)
 }
 
-func TestGivenDeviceTimeoutCheckTimeoutStateRegisteredWaitAuth(t *testing.T) {
-
-	deviceConfiguration, knotConfiguration := loadConfiguration()
-	oldDevice := deviceConfiguration["2801d924dcf1fc52"]
+func (deviceSuite *deviceTimeoutSuite) TestGivenDeviceTimeoutCheckTimeoutStateRegisteredWaitAuth() {
+	oldDevice := deviceSuite.device
 	oldDevice.State = entities.KnotWaitAuth
-	deviceConfiguration[oldDevice.ID] = oldDevice
-	pipeDevices, deviceChan := createChannels()
-	logger, hook := createNullLogger()
-	msgChan := make(chan network.InMsg)
-	knotProtocol, _ := newProtocol(pipeDevices, knotConfiguration, deviceChan, msgChan, logger, deviceConfiguration)
-	device := deviceConfiguration["2801d924dcf1fc52"]
-	device.Error = "timeOut"
-	device.State = entities.KnotRegistered
+	deviceSuite.deviceConfiguration[oldDevice.ID] = oldDevice
+	deviceSuite.device.State = entities.KnotRegistered
 
-	_ = knotProtocol.checkTimeout(device, logger)
+	_ = deviceSuite.protocol.checkTimeout(deviceSuite.device, deviceSuite.logger)
 	expectedErrorMessage := "error: timeOut"
-	assert.Equal(t, hook.LastEntry().Message, expectedErrorMessage)
+	assert.Equal(deviceSuite.T(), deviceSuite.hook.LastEntry().Message, expectedErrorMessage)
 }
 
-func TestGivenDeviceTimeoutCheckTimeoutStateAuthWaitConfig(t *testing.T) {
-
-	deviceConfiguration, knotConfiguration := loadConfiguration()
-	oldDevice := deviceConfiguration["2801d924dcf1fc52"]
+func (deviceSuite *deviceTimeoutSuite) TestGivenDeviceTimeoutCheckTimeoutStateAuthWaitConfig() {
+	oldDevice := deviceSuite.device
 	oldDevice.State = entities.KnotWaitConfig
-	deviceConfiguration[oldDevice.ID] = oldDevice
-	pipeDevices, deviceChan := createChannels()
-	logger, hook := createNullLogger()
-	msgChan := make(chan network.InMsg)
-	knotProtocol, _ := newProtocol(pipeDevices, knotConfiguration, deviceChan, msgChan, logger, deviceConfiguration)
-	device := deviceConfiguration["2801d924dcf1fc52"]
-	device.Error = "timeOut"
-	device.State = entities.KnotAuth
-
-	_ = knotProtocol.checkTimeout(device, logger)
+	deviceSuite.deviceConfiguration[oldDevice.ID] = oldDevice
+	deviceSuite.device.State = entities.KnotAuth
+	_ = deviceSuite.protocol.checkTimeout(deviceSuite.device, deviceSuite.logger)
 	expectedErrorMessage := "error: timeOut"
-	assert.Equal(t, hook.LastEntry().Message, expectedErrorMessage)
+	assert.Equal(deviceSuite.T(), deviceSuite.hook.LastEntry().Message, expectedErrorMessage)
 }
 
-func TestGivenDeviceTimeoutCheckTimeoutStateNew(t *testing.T) {
+func (deviceSuite *deviceTimeoutSuite) TestGivenDeviceTimeoutCheckTimeoutStateNew() {
+	deviceWithCheckedTimeout := deviceSuite.protocol.checkTimeout(deviceSuite.device, deviceSuite.logger)
+	assert.Equal(deviceSuite.T(), deviceWithCheckedTimeout.State, entities.KnotOff)
+}
 
-	deviceConfiguration, knotConfiguration := loadConfiguration()
-	pipeDevices, deviceChan := createChannels()
-	logger := createLogger()
-	msgChan := make(chan network.InMsg)
-	knotProtocol, _ := newProtocol(pipeDevices, knotConfiguration, deviceChan, msgChan, logger, deviceConfiguration)
-	device := deviceConfiguration["2801d924dcf1fc52"]
-	device.Error = "timeOut"
-
-	deviceWithCheckedTimeout := knotProtocol.checkTimeout(device, logger)
-	assert.Equal(t, deviceWithCheckedTimeout.State, entities.KnotOff)
+func TestDeviceTimeoutSuite(t *testing.T) {
+	suite.Run(t, new(deviceTimeoutSuite))
 }
 
 type testCase struct {
@@ -407,7 +363,7 @@ type testCase struct {
 }
 
 var testCases = []testCase{
-	{bidingKey: network.BindingKeyRegistered, expectedMessage: "received a registration response with no error", testName: "TestGivenBindingKeyRegisteredDeviceWithoutErrorHandleKnotAMQP"},
+	{bidingKey: network.BindingKeyRegistered, expectedMessage: "received a registration response with success", testName: "TestGivenBindingKeyRegisteredDeviceWithoutErrorHandleKnotAMQP"},
 	{bidingKey: network.BindingKeyRegistered, expectedMessage: "received a registration response with a error", testName: "TestGivenBindingKeyRegisteredDeviceWithErrorHandleKnotAMQP", errorMessage: "Testing error"},
 	{bidingKey: network.BindingKeyUpdatedConfig, expectedMessage: "received a config update response with a error", testName: "TestGivenBindingKeyUpdatedConfigWithoutErrorKnotAMQP", errorMessage: "testing error"},
 }
@@ -443,9 +399,9 @@ type testCaseWithState struct {
 var testCasesWithState = []testCaseWithState{
 	{bidingKey: network.BindingKeyRegistered, expectedMessage: "received a registration response with a error", testName: "TestGivenBindingKeyRegisteredDeviceAlreadyRegisteredHandleKnotAMQP", errorMessage: "thing is already registered", state: entities.KnotAlreadyReg},
 	{bidingKey: network.BindingKeyUnregistered, expectedMessage: "received a unregistration response", testName: "TestGivenBindingKeyUnregisteredHandleKnotAMQP", errorMessage: "", state: entities.KnotForceDelete},
-	{bidingKey: network.ReplyToAuthMessages, expectedMessage: "received a authentication response with no error", testName: "TestGivenReplyToAuthMessagesHandleWithoutErrorKnotAMQP", errorMessage: "", state: entities.KnotAuth},
+	{bidingKey: network.ReplyToAuthMessages, expectedMessage: "received a authentication response with success", testName: "TestGivenReplyToAuthMessagesHandleWithoutErrorKnotAMQP", errorMessage: "", state: entities.KnotAuth},
 	{bidingKey: network.ReplyToAuthMessages, expectedMessage: "received a authentication response with a error", testName: "TestGivenReplyToAuthMessagesHandleWithoutErrorKnotAMQP", errorMessage: "testing error", state: entities.KnotForceDelete},
-	{bidingKey: network.BindingKeyUpdatedConfig, expectedMessage: "received a config update response with no error", testName: "TestGivenBindingKeyUpdatedConfigWithoutErrorKnotAMQP", errorMessage: "", state: entities.KnotReady},
+	{bidingKey: network.BindingKeyUpdatedConfig, expectedMessage: "received a config update response with success", testName: "TestGivenBindingKeyUpdatedConfigWithoutErrorKnotAMQP", errorMessage: "", state: entities.KnotReady},
 }
 
 func TestGivenBindingKeyRegisteredDeviceAlreadyRegisteredHandleKnotAMQP(t *testing.T) {
@@ -487,8 +443,11 @@ func TestCompareDevices(t *testing.T) {
 
 func TestUpdateDevice(t *testing.T) {
 	fakeDevice := setUp()
+	fileManagementMock := new(fileManagementMock)
+	fileManagementMock.On("writeDevicesConfigFile").Return(nil)
 	newProtocol := protocol{
-		devices: make(map[string]entities.Device),
+		devices:        make(map[string]entities.Device),
+		fileManagement: fileManagementMock,
 	}
 	err := newProtocol.createDevice(fakeDevice)
 
@@ -499,8 +458,11 @@ func TestUpdateDevice(t *testing.T) {
 
 func TestUpdateDeviceWhenNonExistentDeviceThenReturnError(t *testing.T) {
 	fakeDevice := setUp()
+	fileManagementMock := new(fileManagementMock)
+	fileManagementMock.On("writeDevicesConfigFile").Return(nil)
 	newProtocol := protocol{
-		devices: make(map[string]entities.Device),
+		devices:        make(map[string]entities.Device),
+		fileManagement: fileManagementMock,
 	}
 	err := newProtocol.createDevice(fakeDevice)
 
@@ -513,87 +475,283 @@ func TestUpdateDeviceWhenNonExistentDeviceThenReturnError(t *testing.T) {
 
 func TestGenerateID(t *testing.T) {
 	fakeDevice := setUp()
+	fileManagementMock := new(fileManagementMock)
+	fileManagementMock.On("writeDevicesConfigFile").Return(nil)
 	newProtocol := protocol{
-		devices: make(map[string]entities.Device),
+		devices:        make(map[string]entities.Device),
+		fileManagement: fileManagementMock,
 	}
 	pipeDevices, _ := createChannels()
-	os.Setenv("DEVICE_CONFIG_FILEPATH", "/tmp/device_config.yaml")
 	deviceID, err := newProtocol.generateID(pipeDevices, fakeDevice)
 	assert.NoError(t, err)
 	assert.Equal(t, newProtocol.devices[deviceID].State, entities.KnotNew)
 }
 
 type testCaseRequestsKnot struct {
-	oldState        string
-	currentState    string
-	expectedMessage string
+	oldState             string
+	currentState         string
+	expectedMessage      string
+	expectedErrorMessage string
+	functionName         string
 }
 
 var testCasesRequestsKnot = []testCaseRequestsKnot{
-	{entities.KnotNew, entities.KnotWaitConfig, "send a register request"},
-	{entities.KnotRegistered, entities.KnotWaitAuth, "send a auth request"},
-	{entities.KnotAuth, entities.KnotWaitConfig, "send a updateconfig request"},
-	{entities.KnotNew, entities.KnotWaitReg, "send a register request"},
+	{entities.KnotNew, entities.KnotWaitConfig, "send a register request", "registerError", "PublishDeviceRegister"},
+	{entities.KnotRegistered, entities.KnotWaitAuth, "send a auth request", "authError", "PublishDeviceAuth"},
+	{entities.KnotAuth, entities.KnotWaitConfig, "send a updateconfig request", "updateConfigError", "PublishDeviceUpdateConfig"},
 }
 
-func TestRequestsKnot(t *testing.T) {
+var testCasesRequestsKnotStates = []testCaseRequestsKnot{
+	{entities.KnotNew, entities.KnotWaitConfig, "send a register request", "registerError", "PublishDeviceRegister"},
+	{entities.KnotRegistered, entities.KnotWaitAuth, "send a auth request", "authError", "PublishDeviceAuth"},
+	{entities.KnotAuth, entities.KnotWaitConfig, "send a updateconfig request", "updateConfigError", "PublishDeviceUpdateConfig"},
+	{entities.KnotAlreadyReg, "", "send a register request", "knotAlreadyRegError", "PublishDeviceRegister"},
+}
+
+type testState struct {
+	currentState         string
+	expectedErrorMessage string
+	deviceData           []entities.Data
+	expectedError        error
+}
+
+var testCasesKnotStateMachineHandlerStates = []testState{
+	{entities.KnotPublishing, "invalid data, has no data to send", append([]entities.Data{}, createDataWithEmptyTimestamp(1)), nil},
+	{entities.KnotPublishing, "Published data", append([]entities.Data{}, createData(1)), nil},
+}
+
+type requestKNotSuite struct {
+	suite.Suite
+	device        entities.Device
+	protocol      Protocol
+	logger        *logrus.Entry
+	hook          *test.Hook
+	publisherMock *mocks.PublisherMock
+	pipeDevices   chan map[string]entities.Device
+}
+
+func (knot *requestKNotSuite) SetupTest() {
 	os.Setenv("DEVICE_CONFIG_FILEPATH", "/tmp/device_config.yaml")
 	deviceConfiguration, knotConfiguration := loadConfiguration()
-	pipeDevices, deviceChan := createChannels()
-	logger, hook := createNullLogger()
+	knot.pipeDevices, deviceChan = createChannels()
+	knot.logger, knot.hook = createNullLogger()
 	msgChan := make(chan network.InMsg)
-	knotProtocol, _ := newProtocol(pipeDevices, knotConfiguration, deviceChan, msgChan, logger, deviceConfiguration)
-
-	fakeDevice := deviceConfiguration["0d7cd9d221385e1a"]
+	knot.publisherMock = new(mocks.PublisherMock)
+	subscriberMock := new(mocks.SubscriberMock)
+	amqpMock := new(network.AmqpMock)
+	fileManagementMock := new(fileManagementMock)
+	subscriberMock.On("SubscribeToKNoTMessages", msgChan).Return(nil)
+	fileManagementMock.On("writeDevicesConfigFile").Return(nil)
+	knot.protocol, _ = newProtocol(knot.pipeDevices, knotConfiguration, deviceChan, msgChan, knot.logger, deviceConfiguration, knot.publisherMock, subscriberMock, amqpMock, fileManagementMock)
+	knot.device = deviceConfiguration[deviceID]
 	var fakeConfig []entities.Config
 	for i := 1; i <= 10; i++ {
 		fakeConfig = append(fakeConfig, createConfig(i))
 	}
-	fakeDevice.Config = fakeConfig
+	knot.device.Config = fakeConfig
+}
 
+func (knot *requestKNotSuite) TestRequestsKnot() {
 	for _, test := range testCasesRequestsKnot {
-		knotProtocol.requestsKnot(deviceChan, fakeDevice, test.oldState, test.currentState, test.expectedMessage, logger)
-		assert.Equal(t, test.expectedMessage, hook.LastEntry().Message)
+		knot.publisherMock.On(test.functionName).Return(nil)
+		knot.protocol.requestsKnot(deviceChan, knot.device, test.oldState, test.currentState, test.expectedMessage, knot.logger)
+		assert.Equal(knot.T(), test.expectedMessage, knot.hook.LastEntry().Message)
 	}
 }
 
-type testState struct {
-	currentState string
+func (knot *requestKNotSuite) TestRequestsKnotWhenKNoTCommucationFailReturnError() {
+	for _, test := range testCasesRequestsKnot {
+		knot.publisherMock.On(test.functionName).Return(errors.New(test.expectedErrorMessage))
+		knot.protocol.requestsKnot(deviceChan, knot.device, test.oldState, test.currentState, test.expectedMessage, knot.logger)
+		var logMessages []string
+		for _, message := range knot.hook.Entries {
+			logMessages = append(logMessages, message.Message)
+		}
+		assert.Contains(knot.T(), logMessages, test.expectedErrorMessage)
+	}
 }
 
-var testCasesKnotStateMachineHandlerStates = []testState{
-	{entities.KnotNew},
-	//{entities.KnotRegistered},
-	//{entities.KnotAuth},
-	//{entities.KnotReady},
-	//{entities.KnotPublishing},
-	//{entities.KnotAlreadyReg},
-	//{entities.KnotForceDelete},
-	//{entities.KnotError},
+func (knot *requestKNotSuite) TestKnotStateMachineHandler() {
+	<-knot.pipeDevices
+	for _, test := range testCasesKnotStateMachineHandlerStates {
+		knot.publisherMock.On("PublishDeviceData").Return(test.expectedError)
+		knot.device.State = test.currentState
+		knot.device.Data = test.deviceData
+		deviceChan <- knot.device
+		time.Sleep(1 * time.Second)
+		var logMessages []string
+		for _, message := range knot.hook.Entries {
+			logMessages = append(logMessages, message.Message)
+		}
+		assert.Contains(knot.T(), logMessages, test.expectedErrorMessage)
+	}
 }
 
-/*
-func TestKnotStateMachineHandler(t *testing.T) {
+func (knot *requestKNotSuite) TestKnotStateMachineHandlerWhenCommunicationProblemThenError() {
+	var fakeData []entities.Data
+	for i := 1; i <= 10; i++ {
+		fakeData = append(fakeData, createData(i))
+	}
+	knot.device.Data = fakeData
+	knot.publisherMock.On("PublishDeviceData").Return(errors.New("Communication error"))
+
+	states := []string{entities.KnotPublishing}
+	<-knot.pipeDevices
+	for _, state := range states {
+		knot.device.State = state
+		deviceChan <- knot.device
+		time.Sleep(1 * time.Second)
+		var logMessages []string
+		for _, message := range knot.hook.Entries {
+			logMessages = append(logMessages, message.Message)
+		}
+		assert.Contains(knot.T(), logMessages, "Communication error")
+	}
+}
+
+func TestRequestKNotSuite(t *testing.T) {
+	suite.Run(t, new(requestKNotSuite))
+}
+
+type knotStateDeviceEmptyTokenSuite struct {
+	suite.Suite
+	hook          *test.Hook
+	fakeDevice    entities.Device
+	logger        *logrus.Entry
+	publisherMock *mocks.PublisherMock
+	deviceChan    chan entities.Device
+	pipeDevices   chan map[string]entities.Device
+	amqpMock      *network.AmqpMock
+	protocol      Protocol
+}
+
+func (knotSuite *knotStateDeviceEmptyTokenSuite) SetupTest() {
 	os.Setenv("DEVICE_CONFIG_FILEPATH", "/tmp/device_config.yaml")
 	deviceConfiguration, knotConfiguration := loadConfiguration()
-	pipeDevices, deviceChan := createChannels()
-	logger, hook := createNullLogger()
-	msgChan := make(chan network.InMsg)
-	_, err := newProtocol(pipeDevices, knotConfiguration, deviceChan, msgChan, logger, deviceConfiguration)
-
-	assert.NoError(t, err)
-	fakeDevice := deviceConfiguration["0d7cd9d221385e1a"]
-
-	states := []string{entities.KnotNew}
-	<-pipeDevices
-	for _, state := range states {
-		fakeDevice.State = state
-		deviceChan <- fakeDevice
-		time.Sleep(60 * time.Second)
-		for _, entry := range hook.AllEntries() {
-			fmt.Println(entry.Message)
-		}
+	for key, value := range deviceConfiguration {
+		value.Token = ""
+		deviceConfiguration[key] = value
 	}
+	knotSuite.pipeDevices, knotSuite.deviceChan = createChannels()
+	knotSuite.logger, knotSuite.hook = createNullLogger()
+	msgChan := make(chan network.InMsg)
+	knotSuite.publisherMock = new(mocks.PublisherMock)
+	subscriberMock := new(mocks.SubscriberMock)
+	knotSuite.amqpMock = new(network.AmqpMock)
+	knotSuite.publisherMock.On("PublishDeviceRegister").Return(nil)
+	subscriberMock.On("SubscribeToKNoTMessages", msgChan).Return(nil)
+	fileManagementMock := new(fileManagementMock)
+	fileManagementMock.On("writeDevicesConfigFile").Return(nil)
+	var err error
+	knotSuite.protocol, err = newProtocol(knotSuite.pipeDevices, knotConfiguration, knotSuite.deviceChan, msgChan, knotSuite.logger, deviceConfiguration, knotSuite.publisherMock, subscriberMock, knotSuite.amqpMock, fileManagementMock)
 
+	assert.NoError(knotSuite.T(), err)
+	knotSuite.fakeDevice = deviceConfiguration[deviceID]
+	<-knotSuite.pipeDevices
 }
-*/
+
+func (knotSuite *knotStateDeviceEmptyTokenSuite) TestKnotStateMachineHandlerSpecificStates() {
+	for _, test := range testCasesRequestsKnotStates {
+		knotSuite.publisherMock.On(test.functionName).Return(nil)
+		knotSuite.fakeDevice.State = test.oldState
+		knotSuite.deviceChan <- knotSuite.fakeDevice
+		time.Sleep(1 * time.Second)
+		var logMessages []string
+		for _, message := range knotSuite.hook.Entries {
+			logMessages = append(logMessages, message.Message)
+		}
+		assert.Contains(knotSuite.T(), logMessages, test.expectedMessage)
+	}
+}
+
+type invalidDeviceID struct {
+	id                   string
+	expectedErrorMessage string
+}
+
+func (knotSuite *knotStateDeviceEmptyTokenSuite) TestKnotStateMachineHandlerWhenNonExistentDeviceReturnError() {
+	var invalidDevicesID []invalidDeviceID
+	invalidDevicesID = append(invalidDevicesID, invalidDeviceID{id: "", expectedErrorMessage: "Generated device id"})
+	invalidDevicesID = append(invalidDevicesID, invalidDeviceID{id: "invalid", expectedErrorMessage: "device id received does not match the stored"})
+
+	for _, invalidDeviceID := range invalidDevicesID {
+		knotSuite.fakeDevice.ID = invalidDeviceID.id
+		knotSuite.deviceChan <- knotSuite.fakeDevice
+		time.Sleep(1 * time.Second)
+		var logMessages []string
+		for _, message := range knotSuite.hook.Entries {
+			logMessages = append(logMessages, message.Message)
+		}
+		assert.Contains(knotSuite.T(), logMessages, invalidDeviceID.expectedErrorMessage)
+	}
+}
+
+func (knotSuite *knotStateDeviceEmptyTokenSuite) TestKnotStateMachineHandlerForcedDeleteStateReturnDeleteMessage() {
+	knotSuite.fakeDevice.State = entities.KnotForceDelete
+
+	knotSuite.deviceChan <- knotSuite.fakeDevice
+	time.Sleep(1 * time.Second)
+	var logMessages []string
+	for _, message := range knotSuite.hook.Entries {
+		logMessages = append(logMessages, message.Message)
+	}
+	assert.Contains(knotSuite.T(), logMessages, "delete a device")
+}
+
+func (knotSuite *knotStateDeviceEmptyTokenSuite) TestKnotStateMachineHandlerReadyState() {
+	knotSuite.fakeDevice.State = entities.KnotReady
+
+	knotSuite.deviceChan <- knotSuite.fakeDevice
+	time.Sleep(1 * time.Second)
+	devices := <-knotSuite.pipeDevices
+	assert.Equal(knotSuite.T(), devices[deviceID].State, entities.KnotPublishing)
+}
+
+func (knotSuite *knotStateDeviceEmptyTokenSuite) TestKnotStateMachineHandlerErrorStateReturnErrorMessage() {
+	knotError := "thing's config not provided"
+	knotSuite.fakeDevice.State = entities.KnotError
+
+	var expectedErrorMessages []string = []string{knotError, "ERROR WITHOUT HANDLER" + "error"}
+	var errorMessages []string = []string{knotError, "error"}
+	for index, errorMessage := range errorMessages {
+		knotSuite.fakeDevice.Error = errorMessage
+		knotSuite.deviceChan <- knotSuite.fakeDevice
+		time.Sleep(1 * time.Second)
+		var logMessages []string
+		for _, message := range knotSuite.hook.Entries {
+			logMessages = append(logMessages, message.Message)
+		}
+		assert.Contains(knotSuite.T(), logMessages, expectedErrorMessages[index])
+	}
+}
+
+func (knotSuite *knotStateDeviceEmptyTokenSuite) TestClose() {
+	knotSuite.amqpMock.On("Stop").Return(nil)
+	err := knotSuite.protocol.Close()
+	assert.Nil(knotSuite.T(), err)
+}
+
+func TestKnotStateDeviceEmptyTokenSuite(t *testing.T) {
+	suite.Run(t, new(knotStateDeviceEmptyTokenSuite))
+}
+
+func TestNewProtocolWhenSubscribeToKNoTMessagesErrorReturnErrorMessage(t *testing.T) {
+	os.Setenv("DEVICE_CONFIG_FILEPATH", "/tmp/device_config.yaml")
+	deviceConfiguration, knotConfiguration := loadConfiguration()
+	for key, value := range deviceConfiguration {
+		value.Token = ""
+		deviceConfiguration[key] = value
+	}
+	pipeDevices, deviceChan := createChannels()
+	logger, _ := createNullLogger()
+	msgChan := make(chan network.InMsg)
+	publisherMock := new(mocks.PublisherMock)
+	subscriberMock := new(mocks.SubscriberMock)
+	amqpMock := new(network.AmqpMock)
+	errorToSubscribeMessage := "errorToSubscriber"
+	subscriberMock.On("SubscribeToKNoTMessages", msgChan).Return(errors.New(errorToSubscribeMessage))
+	fileManagementMock := new(fileManagementMock)
+	fileManagementMock.On("writeDevicesConfigFile").Return(nil)
+	_, err := newProtocol(pipeDevices, knotConfiguration, deviceChan, msgChan, logger, deviceConfiguration, publisherMock, subscriberMock, amqpMock, fileManagementMock)
+	assert.ErrorContains(t, err, errorToSubscribeMessage)
+}

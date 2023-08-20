@@ -2,7 +2,6 @@ package knot
 
 import (
 	"fmt"
-	"strings"
 	"sync"
 
 	"github.com/janael-pinheiro/knot_go_sdk/pkg/entities"
@@ -25,8 +24,18 @@ var msgChan = make(chan network.InMsg)
 func NewKNoTIntegration(pipeDevices chan map[string]entities.Device, conf entities.IntegrationKNoTConfig, log *logrus.Entry, devices map[string]entities.Device) (*Integration, error) {
 	var err error
 	KNoTInteration := Integration{}
-
-	KNoTInteration.protocol, err = newProtocol(pipeDevices, conf, deviceChan, msgChan, log, devices)
+	amqpConnection := network.NewAmqpConnection(conf.URL)
+	amqp := network.NewAMQPHandler(amqpConnection)
+	err = amqp.Start()
+	if err != nil {
+		log.Println("KNoT connection error")
+	} else {
+		log.Println("KNoT connected")
+	}
+	publisher := network.NewMsgPublisher(amqp)
+	subscriber := network.NewMsgSubscriber(amqp)
+	fileManagement := new(fileManagement)
+	KNoTInteration.protocol, err = newProtocol(pipeDevices, conf, deviceChan, msgChan, log, devices, publisher, subscriber, amqp, fileManagement)
 	if err != nil {
 		return nil, errors.Wrap(err, "new knot protocol")
 	}
@@ -49,12 +58,10 @@ func (i Integration) Transmit(device entities.Device) {
 
 	var data []entities.Data
 	for _, d := range device.Data {
-		timestamp := formatTimestampToUTC(fmt.Sprintf("%v", d.TimeStamp))
-		if !isMeasurementNew(i.sensorIDTimestampMapping, timestamp, d.SensorID) {
+		if !isMeasurementNew(i.sensorIDTimestampMapping, fmt.Sprintf("%v", d.TimeStamp), d.SensorID) {
 			continue
 		}
-		i.sensorIDTimestampMapping = updateTagNameTimestampMapping(i.sensorIDTimestampMapping, timestamp, d.SensorID)
-		d.TimeStamp = timestamp
+		i.sensorIDTimestampMapping = updateSensorIDTimestampMapping(i.sensorIDTimestampMapping, fmt.Sprintf("%v", d.TimeStamp), d.SensorID)
 		data = append(data, d)
 	}
 	if data != nil && device.State == entities.KnotPublishing {
@@ -90,15 +97,6 @@ func (i Integration) GetDevice(devices map[string]entities.Device) entities.Devi
 	return devices[keys[firstDeviceIndex]]
 }
 
-func formatTimestampToUTC(timestamp string) string {
-	/*
-		Expected format for the timestamp: "2021-12-22 14:24:00".
-	*/
-	formattedTimestamp := strings.Replace(timestamp, " ", "T", -1)
-	formattedTimestamp = fmt.Sprintf("%s.0-0300", formattedTimestamp)
-	return formattedTimestamp
-}
-
 func isMeasurementNew(tagNameTimestampMapping map[int]string, timestamp string, sensorID int) bool {
 	// Checks if the timestamp of the current measurement is different from the previous one.
 	// As the database returns the query result temporally ordered,
@@ -106,7 +104,7 @@ func isMeasurementNew(tagNameTimestampMapping map[int]string, timestamp string, 
 	return tagNameTimestampMapping[sensorID] != timestamp
 }
 
-func updateTagNameTimestampMapping(tagNameTimestampMapping map[int]string, timestamp string, sensorID int) map[int]string {
+func updateSensorIDTimestampMapping(tagNameTimestampMapping map[int]string, timestamp string, sensorID int) map[int]string {
 	consumerMutex.Lock()
 	tagNameTimestampMapping[sensorID] = timestamp
 	consumerMutex.Unlock()

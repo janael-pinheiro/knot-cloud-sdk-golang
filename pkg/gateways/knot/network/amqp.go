@@ -1,7 +1,6 @@
 package network
 
 import (
-	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -10,10 +9,19 @@ import (
 	"github.com/streadway/amqp"
 )
 
-const (
-	exchangeTypeDirect = "direct"
-	exchangeTypeFanout = "fanout"
+type Messaging interface {
+	Start() error
+	Stop() error
+	OnMessage(msgChan chan InMsg, queueName, exchangeName, exchangeType, key string) error
+	PublishPersistentMessage(exchange, exchangeType, key string, data interface{}, options *MessageOptions) error
+	Connect() error
+	DeclareExchange(name, exchangeType string) error
+	DeclareQueue(name string) error
+}
 
+const (
+	exchangeTypeDirect  = "direct"
+	exchangeTypeFanout  = "fanout"
 	exchangeDevice      = "device"
 	exchangeSent        = "data.sent"
 	ReplyToAuthMessages = "sql-auth-rpc"
@@ -27,11 +35,8 @@ const (
 	consumerTag         = ""
 )
 
-type AMQP struct {
-	url               string
-	conn              *amqp.Connection
-	channel           *amqp.Channel
-	queue             *amqp.Queue
+type AMQPHandler struct {
+	connection        connection
 	declaredExchanges map[string]struct{}
 }
 
@@ -54,13 +59,13 @@ type MessageOptions struct {
 
 var exchangeLock *sync.Mutex = &sync.Mutex{}
 
-func NewAMQP(url string) *AMQP {
+func NewAMQPHandler(connection connection) Messaging {
 	declaredExchanges := make(map[string]struct{})
-	return &AMQP{url, nil, nil, nil, declaredExchanges}
+	return &AMQPHandler{connection, declaredExchanges}
 }
 
-func (a *AMQP) Start() error {
-	err := backoff.Retry(a.connect, backoff.NewExponentialBackOff())
+func (a *AMQPHandler) Start() error {
+	err := backoff.Retry(a.Connect, backoff.NewExponentialBackOff())
 	if err != nil {
 		return err
 	}
@@ -68,29 +73,26 @@ func (a *AMQP) Start() error {
 	return nil
 }
 
-func (a *AMQP) Stop() {
-	if a.conn != nil && !a.conn.IsClosed() {
-		defer a.conn.Close()
+func (a *AMQPHandler) Stop() error {
+	if !a.connection.isClosed() {
+		defer a.connection.close()
 	}
 
-	if a.channel != nil {
-		defer a.channel.Close()
-	}
-
+	return a.connection.closeChannel()
 }
 
-func (a *AMQP) OnMessage(msgChan chan InMsg, queueName, exchangeName, exchangeType, key string) error {
-	err := a.declareExchange(exchangeName, exchangeType)
+func (a *AMQPHandler) OnMessage(msgChan chan InMsg, queueName, exchangeName, exchangeType, key string) error {
+	err := a.DeclareExchange(exchangeName, exchangeType)
 	if err != nil {
 		return err
 	}
 
-	err = a.declareQueue(queueName)
+	err = a.DeclareQueue(queueName)
 	if err != nil {
 		return err
 	}
 
-	err = a.channel.QueueBind(
+	err = a.connection.queueBind(
 		queueName,
 		key,
 		exchangeName,
@@ -101,7 +103,7 @@ func (a *AMQP) OnMessage(msgChan chan InMsg, queueName, exchangeName, exchangeTy
 		return err
 	}
 
-	deliveries, err := a.channel.Consume(
+	deliveries, err := a.connection.consume(
 		queueName,
 		consumerTag,
 		noAck,
@@ -119,27 +121,10 @@ func (a *AMQP) OnMessage(msgChan chan InMsg, queueName, exchangeName, exchangeTy
 	return nil
 }
 
-func (a *AMQP) PublishPersistentMessage(exchange, exchangeType, key string, data interface{}, options *MessageOptions) error {
-	var headers map[string]interface{}
-	var corrID, expTime, replyTo string
-
-	if options != nil {
-		headers = map[string]interface{}{
-			"Authorization": options.Authorization,
-		}
-		corrID = options.CorrelationID
-		replyTo = options.ReplyTo
-		expTime = options.Expiration
-	}
-
-	body, err := json.Marshal(data)
-	if err != nil {
-		return fmt.Errorf("error enconding JSON message: %w", err)
-	}
-
+func (a *AMQPHandler) PublishPersistentMessage(exchange, exchangeType, key string, data interface{}, options *MessageOptions) error {
 	//Reduces communication with the AMQP server by avoiding redeclaring an exchage of the same type.
 	if !a.exchangeAlreadyDeclared(exchange) {
-		err = a.declareExchange(exchange, exchangeType)
+		err := a.DeclareExchange(exchange, exchangeType)
 		if err != nil {
 			return fmt.Errorf("error declaring exchange: %w", err)
 		} else {
@@ -148,24 +133,7 @@ func (a *AMQP) PublishPersistentMessage(exchange, exchangeType, key string, data
 			exchangeLock.Unlock()
 		}
 	}
-
-	err = a.channel.Publish(
-		exchange,
-		key,
-		false, // mandatory
-		false, // immediate
-		amqp.Publishing{
-			Headers:         headers,
-			ContentType:     "text/plain",
-			ContentEncoding: "",
-			DeliveryMode:    amqp.Persistent,
-			Priority:        0,
-			CorrelationId:   corrID,
-			ReplyTo:         replyTo,
-			Body:            body,
-			Expiration:      expTime,
-		},
-	)
+	err := a.connection.publish(exchange, key, false, false, data, options)
 	if err != nil {
 		return fmt.Errorf("error publishing message in channel: %w", err)
 	}
@@ -173,17 +141,15 @@ func (a *AMQP) PublishPersistentMessage(exchange, exchangeType, key string, data
 	return nil
 }
 
-func (a *AMQP) exchangeAlreadyDeclared(exchangeName string) bool {
+func (a *AMQPHandler) exchangeAlreadyDeclared(exchangeName string) bool {
 	exchangeLock.Lock()
 	_, ok := a.declaredExchanges[exchangeName]
 	exchangeLock.Unlock()
 	return ok
 }
 
-func (a *AMQP) notifyWhenClosed() {
-	errReason := <-a.conn.NotifyClose(make(chan *amqp.Error))
-
-	//randomized interval = RetryInterval * (random value in range [1 - RandomizationFactor, 1 + RandomizationFactor])
+func (a *AMQPHandler) notifyWhenClosed() {
+	errReason := <-a.connection.notifyClose(make(chan *amqp.Error))
 	inicialIntervalSecond := 30 * time.Second
 	maxIntervalInMinutes := 5 * time.Minute
 	intervalMultiplier := 1.7
@@ -196,20 +162,18 @@ func (a *AMQP) notifyWhenClosed() {
 	reconnectionBackOff.MaxElapsedTime = neverStopTryReconnection
 
 	reconnection := func() error {
-		conn, err := amqp.Dial(a.url)
+		err := a.connection.connect()
 		if err != nil {
 			fmt.Println("Error on Dial func, Cannot connect to KNoT: ", err, "Will retry after", reconnectionBackOff.NextBackOff()/time.Second, "seconds")
 			return err
 		}
 
-		a.conn = conn
-		channel, err := a.conn.Channel()
+		err = a.connection.createChannel()
 		if err != nil {
 			fmt.Println("Error to get a channel, Cannot connect to KNoT: ", err, "Will retry after", reconnectionBackOff.NextBackOff()/time.Second, "seconds")
 			return err
 		}
 		fmt.Println("Reconnection to KNoT amqp was successful")
-		a.channel = channel
 
 		return nil
 	}
@@ -224,48 +188,21 @@ func (a *AMQP) notifyWhenClosed() {
 	}
 }
 
-func (a *AMQP) connect() error {
-	conn, err := amqp.Dial(a.url)
+func (a *AMQPHandler) Connect() error {
+	err := a.connection.connect()
 	if err != nil {
 		return err
 	}
 
-	a.conn = conn
-	channel, err := a.conn.Channel()
-	if err != nil {
-		return err
-	}
-
-	a.channel = channel
-
-	return nil
+	return a.connection.createChannel()
 }
 
-func (a *AMQP) declareExchange(name, exchangeType string) error {
-	return a.channel.ExchangeDeclare(
-		name,
-		exchangeType,
-		durable,
-		deleteWhenUnused,
-		internal,
-		noWait,
-		nil, // arguments
-	)
+func (a *AMQPHandler) DeclareExchange(name, exchangeType string) error {
+	return a.connection.exchangeDeclare(name, exchangeType)
 }
 
-func (a *AMQP) declareQueue(name string) error {
-
-	queue, err := a.channel.QueueDeclare(
-		name,
-		durable,
-		deleteWhenUnused,
-		exclusive,
-		noWait,
-		nil, // arguments
-	)
-
-	a.queue = &queue
-	return err
+func (a *AMQPHandler) DeclareQueue(name string) error {
+	return a.connection.queueDeclare(name)
 }
 
 func convertDeliveryToInMsg(deliveries <-chan amqp.Delivery, outMsg chan InMsg) {
