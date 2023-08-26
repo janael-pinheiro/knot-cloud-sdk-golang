@@ -2,24 +2,41 @@ package knot
 
 import (
 	"fmt"
+	"os"
+	"strconv"
 	"sync"
 
+	bloomFilter "github.com/bits-and-blooms/bloom/v3"
 	"github.com/janael-pinheiro/knot_go_sdk/pkg/entities"
 	"github.com/janael-pinheiro/knot_go_sdk/pkg/gateways/knot/network"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
 
+const (
+	DUPLICATION_FILTER            = "0"
+	FILTER_CAPACITY               = "1000000"
+	DUPLICATION_PROBABILITY       = "0.01"
+	RESET_FILTER_USAGE_PERCENTAGE = "0.75"
+)
+
 type Integration struct {
-	protocol                 Protocol
-	sensorIDTimestampMapping map[int]string
-	pipeDevices              chan map[string]entities.Device
+	protocol                        Protocol
+	pipeDevices                     chan map[string]entities.Device
+	filters                         map[string]*bloomFilter.BloomFilter
+	maximumPercentageFilterUsage    float32
+	filterCapacity                  uint
+	duplicationProbability          float64
+	isMeasurementDuplicatedFunction func(string, int, string) bool
 }
 
 var consumerMutex *sync.Mutex = GetMutex()
+var duplicationMutex *sync.RWMutex = &sync.RWMutex{}
 
 var deviceChan = make(chan entities.Device)
 var msgChan = make(chan network.InMsg)
+
+var duplicationFilterFunctionMapping map[string]func(string, int, string) bool = map[string]func(string, int, string) bool{}
 
 func NewKNoTIntegration(pipeDevices chan map[string]entities.Device, conf entities.IntegrationKNoTConfig, log *logrus.Entry, devices map[string]entities.Device) (*Integration, error) {
 	var err error
@@ -39,14 +56,32 @@ func NewKNoTIntegration(pipeDevices chan map[string]entities.Device, conf entiti
 	if err != nil {
 		return nil, errors.Wrap(err, "new knot protocol")
 	}
-	KNoTInteration.sensorIDTimestampMapping = make(map[int]string)
 	KNoTInteration.pipeDevices = pipeDevices
+	KNoTInteration.filters = map[string]*bloomFilter.BloomFilter{}
+	maximumPercentageFilterUsage, err := strconv.ParseFloat(getValueFromEnvironmentVariable("RESET_FILTER_USAGE_PERCENTAGE", RESET_FILTER_USAGE_PERCENTAGE), 32)
+	if err != nil {
+		panic("RESET_FILTER_USAGE_PERCENTAGE environment variable with invalid value.")
+	}
+	KNoTInteration.maximumPercentageFilterUsage = float32(maximumPercentageFilterUsage)
+	filterCapacity, capacityErr := strconv.ParseUint(getValueFromEnvironmentVariable("FILTER_CAPACITY", FILTER_CAPACITY), 10, 0)
+	duplicationProbability, probabilityErr := strconv.ParseFloat(getValueFromEnvironmentVariable("DUPLICATION_PROBABILITY", DUPLICATION_PROBABILITY), 32)
+	if capacityErr != nil || probabilityErr != nil {
+		panic("FILTER_CAPACITY and DUPLICATION_PROBABILITY environment variables with invalid values.")
+	}
+	KNoTInteration.filterCapacity = uint(filterCapacity)
+	KNoTInteration.duplicationProbability = float64(duplicationProbability)
+	duplicationFilterFunctionMapping[DUPLICATION_FILTER] = func(timestamp string, sensorID int, deviceID string) bool { return false }
+	duplicationFilterFunctionMapping["1"] = KNoTInteration.isMeasurementDuplicated
+	enableDuplicationFilter := getValueFromEnvironmentVariable("DUPLICATION_FILTER", DUPLICATION_FILTER)
+	KNoTInteration.isMeasurementDuplicatedFunction = duplicationFilterFunctionMapping[enableDuplicationFilter]
 	return &KNoTInteration, nil
 }
 
 // HandleUplinkEvent sends an UplinkEvent.
 func (i *Integration) HandleDevice(device entities.Device) {
-	device.State = ""
+	if device.State == entities.KnotNew {
+		device.State = ""
+	}
 	deviceChan <- device
 }
 
@@ -58,12 +93,15 @@ func (i Integration) Transmit(device entities.Device) {
 
 	var data []entities.Data
 	for _, d := range device.Data {
-		if !isMeasurementNew(i.sensorIDTimestampMapping, fmt.Sprintf("%v", d.TimeStamp), d.SensorID) {
+		if i.isMeasurementDuplicatedFunction(fmt.Sprintf("%v", d.TimeStamp), d.SensorID, device.ID) {
 			continue
 		}
-		i.sensorIDTimestampMapping = updateSensorIDTimestampMapping(i.sensorIDTimestampMapping, fmt.Sprintf("%v", d.TimeStamp), d.SensorID)
+		duplicationMutex.Lock()
+		i.filters[device.ID] = i.updateDuplicationFilter(fmt.Sprintf("%v", d.TimeStamp), d.SensorID, device.ID)
+		duplicationMutex.Unlock()
 		data = append(data, d)
 	}
+
 	if data != nil && device.State == entities.KnotPublishing {
 		device.Data = data
 		i.HandleDevice(device)
@@ -73,12 +111,16 @@ func (i Integration) Transmit(device entities.Device) {
 func (i Integration) Register(device entities.Device) entities.Device {
 	i.HandleDevice(device)
 	var d entities.Device
+
 	for devices := range i.pipeDevices {
 		consumerMutex.Lock()
 		device = i.GetDevice(devices)
 		consumerMutex.Unlock()
 		if device.State == entities.KnotPublishing {
 			d = device
+			duplicationMutex.Lock()
+			i.filters[device.ID] = bloomFilter.NewWithEstimates(i.filterCapacity, i.duplicationProbability)
+			duplicationMutex.Unlock()
 			break
 		}
 	}
@@ -97,18 +139,23 @@ func (i Integration) GetDevice(devices map[string]entities.Device) entities.Devi
 	return devices[keys[firstDeviceIndex]]
 }
 
-func isMeasurementNew(tagNameTimestampMapping map[int]string, timestamp string, sensorID int) bool {
-	// Checks if the timestamp of the current measurement is different from the previous one.
-	// As the database returns the query result temporally ordered,
-	// we just need to check if the current timestamp is different from the previous one.
-	return tagNameTimestampMapping[sensorID] != timestamp
+func (i Integration) isMeasurementDuplicated(timestamp string, sensorID int, deviceID string) bool {
+	// Checks if the timestamp of the current measurement is different from the previous ones.
+	return i.filters[deviceID].Test([]byte(fmt.Sprintf("%s_%d", timestamp, sensorID)))
 }
 
-func updateSensorIDTimestampMapping(tagNameTimestampMapping map[int]string, timestamp string, sensorID int) map[int]string {
-	consumerMutex.Lock()
-	tagNameTimestampMapping[sensorID] = timestamp
-	consumerMutex.Unlock()
-	return tagNameTimestampMapping
+func (i Integration) updateDuplicationFilter(timestamp string, sensorID int, deviceID string) *bloomFilter.BloomFilter {
+	i.resetDuplicationFilter(deviceID)
+	return i.filters[deviceID].Add([]byte(fmt.Sprintf("%s_%d", timestamp, sensorID)))
+}
+
+func (i Integration) resetDuplicationFilter(deviceID string) {
+	approximatedFilterSize := i.filters[deviceID].ApproximatedSize()
+	filterCapacity := i.filters[deviceID].Cap()
+	currentPercentageFilterUsage := (float32(approximatedFilterSize) / float32(filterCapacity)) * 100
+	if currentPercentageFilterUsage >= i.maximumPercentageFilterUsage {
+		i.filters[deviceID].ClearAll()
+	}
 }
 
 func (i Integration) SentDataToKNoT(sensors []entities.Data, device entities.Device) {
@@ -123,4 +170,12 @@ func (i Integration) SentDataToKNoT(sensors []entities.Data, device entities.Dev
 	}
 	device.Data = data
 	i.Transmit(device)
+}
+
+func getValueFromEnvironmentVariable(variableName, defaultValue string) string {
+	value := os.Getenv(variableName)
+	if value != "" {
+		return value
+	}
+	return defaultValue
 }

@@ -1,8 +1,11 @@
 package knot
 
 import (
+	"fmt"
+	"os"
 	"testing"
 
+	bloomFilter "github.com/bits-and-blooms/bloom/v3"
 	"github.com/janael-pinheiro/knot_go_sdk/pkg/entities"
 	"github.com/janael-pinheiro/knot_go_sdk/pkg/gateways/knot/network"
 	"github.com/stretchr/testify/assert"
@@ -23,6 +26,9 @@ func (knot *knotIntegrationSuite) SetupTest() {
 	knot.deviceConfiguration, _ = loadConfiguration()
 	knot.fakeDevice = knot.deviceConfiguration[deviceID]
 	knot.integration = new(Integration)
+	knot.integration.filters = map[string]*bloomFilter.BloomFilter{}
+	knot.integration.filters[knot.fakeDevice.ID] = bloomFilter.NewWithEstimates(1000000, 0.01)
+	knot.integration.maximumPercentageFilterUsage = 0.75
 }
 
 func (knot *knotIntegrationSuite) TestHandleDevice() {
@@ -46,7 +52,7 @@ func (knot *knotIntegrationSuite) TestTransmit() {
 		fakeData = append(fakeData, createData(i))
 	}
 	knot.fakeDevice.Data = fakeData
-	knot.integration.sensorIDTimestampMapping = make(map[int]string)
+	knot.integration.isMeasurementDuplicatedFunction = knot.integration.isMeasurementDuplicated
 	go knot.integration.Transmit(knot.fakeDevice)
 	device := <-deviceChan
 	assert.Equal(knot.T(), knot.fakeDevice.Name, device.Name)
@@ -62,7 +68,7 @@ func (knot *knotIntegrationSuite) TestTransmitWhenDuplicateDataOmitDuplication()
 		fakeData = append(fakeData, createData(sensorID))
 	}
 	knot.fakeDevice.Data = fakeData
-	knot.integration.sensorIDTimestampMapping = make(map[int]string)
+	knot.integration.isMeasurementDuplicatedFunction = knot.integration.isMeasurementDuplicated
 	go knot.integration.Transmit(knot.fakeDevice)
 	device := <-deviceChan
 	assert.Equal(knot.T(), knot.fakeDevice.Name, device.Name)
@@ -77,7 +83,7 @@ func (knot *knotIntegrationSuite) TestSentDataToKNoT() {
 	for i := 1; i <= numberSensors; i++ {
 		fakeData = append(fakeData, createData(i))
 	}
-	knot.integration.sensorIDTimestampMapping = make(map[int]string)
+	knot.integration.isMeasurementDuplicatedFunction = knot.integration.isMeasurementDuplicated
 	go knot.integration.SentDataToKNoT(fakeData, knot.fakeDevice)
 	device := <-deviceChan
 	assert.Equal(knot.T(), knot.fakeDevice.Name, device.Name)
@@ -90,7 +96,6 @@ func (knot *knotIntegrationSuite) TestRegister() {
 	knot.deviceConfiguration[knot.fakeDevice.ID] = knot.fakeDevice
 	numberSensors := 1
 	knot.integration.pipeDevices = make(chan map[string]entities.Device)
-	knot.integration.sensorIDTimestampMapping = make(map[int]string)
 	go func(pipeDevices chan map[string]entities.Device, deviceConfiguration map[string]entities.Device) {
 		<-deviceChan
 		pipeDevices <- deviceConfiguration
@@ -99,6 +104,44 @@ func (knot *knotIntegrationSuite) TestRegister() {
 	assert.Equal(knot.T(), knot.fakeDevice.Name, device.Name)
 	assert.Equal(knot.T(), numberSensors, len(device.Data))
 	assert.Empty(knot.T(), deviceChan)
+}
+
+func (knot *knotIntegrationSuite) TestIsMeasurementDuplicatedWhenExistingMeasurementThenTrue() {
+	knot.integration.filters[knot.fakeDevice.ID] = knot.integration.filters[knot.fakeDevice.ID].Add([]byte(fmt.Sprintf("%s_%d", testTimestamp, sensorID)))
+	isMeasurementDuplicated := knot.integration.isMeasurementDuplicated(testTimestamp, sensorID, knot.fakeDevice.ID)
+	assert.True(knot.T(), isMeasurementDuplicated)
+}
+
+func (knot *knotIntegrationSuite) TestIsMeasurementDuplicatedWhenDuplicateMeasurementThenTrue() {
+	newTimestamp := "2023-08-26"
+	knot.integration.filters[knot.fakeDevice.ID] = knot.integration.filters[knot.fakeDevice.ID].Add([]byte(fmt.Sprintf("%s_%d", testTimestamp, sensorID)))
+	isMeasurementDuplicated := knot.integration.isMeasurementDuplicated(newTimestamp, sensorID, knot.fakeDevice.ID)
+	assert.False(knot.T(), isMeasurementDuplicated)
+	knot.integration.filters[knot.fakeDevice.ID] = knot.integration.updateDuplicationFilter(newTimestamp, sensorID, knot.fakeDevice.ID)
+	isMeasurementDuplicated = knot.integration.isMeasurementDuplicated(testTimestamp, sensorID, knot.fakeDevice.ID)
+	assert.True(knot.T(), isMeasurementDuplicated)
+}
+
+func (knot *knotIntegrationSuite) TestIsMeasurementDuplicatedWhenNewMeasurementThenFalse() {
+	isMeasurementDuplicated := knot.integration.isMeasurementDuplicated("2023-08-26", sensorID, knot.fakeDevice.ID)
+	assert.False(knot.T(), isMeasurementDuplicated)
+}
+
+func (knot *knotIntegrationSuite) TestUpdateDuplicationFilter() {
+	newTimestamp := "2023-08-29"
+	knot.integration.filters[knot.fakeDevice.ID] = knot.integration.updateDuplicationFilter(newTimestamp, sensorID, knot.fakeDevice.ID)
+	assert.True(knot.T(), knot.integration.filters[knot.fakeDevice.ID].Test([]byte(fmt.Sprintf("%s_%d", newTimestamp, sensorID))))
+}
+
+func (knot *knotIntegrationSuite) TestResetDuplicationFilter() {
+	filterCapacity := knot.integration.filters[knot.fakeDevice.ID].Cap()
+	maximumAllowedFilterSize := float32(filterCapacity) * 0.80
+	for i := 0; i < int(maximumAllowedFilterSize); i++ {
+		knot.integration.filters[knot.fakeDevice.ID].Add([]byte(fmt.Sprintf("%d", i)))
+	}
+	assert.NotEqual(knot.T(), 0, int(knot.integration.filters[knot.fakeDevice.ID].ApproximatedSize()))
+	knot.integration.resetDuplicationFilter(knot.fakeDevice.ID)
+	assert.Equal(knot.T(), 0, int(knot.integration.filters[knot.fakeDevice.ID].ApproximatedSize()))
 }
 
 func TestKnotIntegrationSuite(t *testing.T) {
@@ -119,21 +162,18 @@ func TestClose(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestIsMeasurementNewWhenExistingMeasurementThenFalse(t *testing.T) {
-	timestampMapping := map[int]string{sensorID: testTimestamp}
-	isMeasurementNew := isMeasurementNew(timestampMapping, "2023-08-25", sensorID)
-	assert.False(t, isMeasurementNew)
+func TestGetValueFromEnvironmentVariableWhenVariableExistsThenReturnValue(t *testing.T) {
+	variableName := "TEST_VARIABLE"
+	expectedVariableValue := "0"
+	defaultValue := "1"
+	os.Setenv(variableName, expectedVariableValue)
+	actualVariableValue := getValueFromEnvironmentVariable(variableName, defaultValue)
+	assert.Equal(t, expectedVariableValue, actualVariableValue)
 }
 
-func TestIsMeasurementNewWhenNewMeasurementThenTrue(t *testing.T) {
-	timestampMapping := map[int]string{sensorID: testTimestamp}
-	isMeasurementNew := isMeasurementNew(timestampMapping, "2023-08-26", sensorID)
-	assert.True(t, isMeasurementNew)
-}
-
-func TestUpdateTagNameTimestampMapping(t *testing.T) {
-	timestampMapping := map[int]string{sensorID: testTimestamp}
-	newTimestamp := "2023-08-29"
-	updatedTagNameTimestampMapping := updateSensorIDTimestampMapping(timestampMapping, newTimestamp, sensorID)
-	assert.Equal(t, updatedTagNameTimestampMapping[sensorID], newTimestamp)
+func TestGetValueFromEnvironmentVariableWhenVariableNotExistsThenReturnDefaultValue(t *testing.T) {
+	variableName := "TEST_VARIABLE_2"
+	defaultValue := "1"
+	actualVariableValue := getValueFromEnvironmentVariable(variableName, defaultValue)
+	assert.Equal(t, defaultValue, actualVariableValue)
 }

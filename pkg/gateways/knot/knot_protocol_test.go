@@ -263,6 +263,7 @@ func TestGivenInvalidConfigTimeout(t *testing.T) {
 	logger := createLogger()
 	msgChan := make(chan network.InMsg)
 	var err error
+	os.Setenv("DEVICE_CONFIG_FILEPATH", "fake_device_configuration_filepath.yaml")
 	go func() {
 		publisherMock := new(mocks.PublisherMock)
 		subscriberMock := new(mocks.SubscriberMock)

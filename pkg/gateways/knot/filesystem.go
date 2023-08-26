@@ -9,5 +9,5 @@ type filesystemManagement interface {
 type fileManagement struct{}
 
 func (fs *fileManagement) writeDevicesConfigFile(filepath string, data []byte) error {
-	return os.WriteFile(os.Getenv(filepath), data, 0600)
+	return os.WriteFile(filepath, data, 0600)
 }

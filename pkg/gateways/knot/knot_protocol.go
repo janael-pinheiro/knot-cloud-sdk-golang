@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"os"
 	"sync"
 	"time"
 
@@ -37,10 +36,11 @@ type networkWrapper struct {
 }
 
 type protocol struct {
-	userToken      string
-	network        *networkWrapper
-	devices        map[string]entities.Device
-	fileManagement filesystemManagement
+	userToken                    string
+	network                      *networkWrapper
+	devices                      map[string]entities.Device
+	fileManagement               filesystemManagement
+	devicesConfigurationFilepath string
 }
 
 const (
@@ -137,7 +137,11 @@ func newProtocol(pipeDevices chan map[string]entities.Device, conf entities.Inte
 	}
 	p.devices = make(map[string]entities.Device)
 	p.devices = devices
-
+	devicesConfigurationFilepath := getValueFromEnvironmentVariable("DEVICE_CONFIG_FILEPATH", "")
+	if devicesConfigurationFilepath == "" {
+		panic("DEVICE_CONFIG_FILEPATH environment variable value needs to be defined.")
+	}
+	p.devicesConfigurationFilepath = devicesConfigurationFilepath
 	newBidingKeyActionMapping := NewBidingKeyActionMapping()
 	go handlerKnotAMQP(msgChan, deviceChan, log, newBidingKeyActionMapping)
 	go knotStateMachineHandler(pipeDevices, deviceChan, p, log)
@@ -147,7 +151,6 @@ func newProtocol(pipeDevices chan map[string]entities.Device, conf entities.Inte
 
 // Check for data to be updated
 func (p *protocol) checkData(device entities.Device) error {
-
 	if device.Data == nil || len(device.Data) == 0 {
 		return errors.New("Invalid data")
 	}
@@ -302,7 +305,7 @@ func (p *protocol) writeDevicesConfigFile(device entities.Device) error {
 		return err
 	}
 
-	err = p.fileManagement.writeDevicesConfigFile(os.Getenv("DEVICE_CONFIG_FILEPATH"), data) //os.WriteFile(os.Getenv("DEVICE_CONFIG_FILEPATH"), data, 0600)
+	err = p.fileManagement.writeDevicesConfigFile(p.devicesConfigurationFilepath, data)
 	if err != nil {
 		log.Panic(err)
 	}
@@ -503,12 +506,12 @@ func knotStateMachineHandler(pipeDevices chan map[string]entities.Device, device
 				}
 			// Send the new data that comes from the device to Knot Cloud
 			case entities.KnotPublishing:
-				if p.checkData(device) == nil {
+				err := p.checkData(device)
+				if err == nil {
 					err := p.network.publisher.PublishDeviceData(p.userToken, &device, device.Data)
 					if err != nil {
 						log.Errorln(err)
 					} else {
-						log.Println("Published data")
 						device.Data = nil
 						knotMutex.Lock()
 						err = p.updateDevice(device)

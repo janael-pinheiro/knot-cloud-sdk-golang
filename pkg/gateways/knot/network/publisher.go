@@ -1,6 +1,8 @@
 package network
 
 import (
+	"fmt"
+
 	"github.com/janael-pinheiro/knot_go_sdk/pkg/entities"
 )
 
@@ -79,6 +81,7 @@ func (mp *msgPublisher) PublishDeviceAuth(userToken string, device *entities.Dev
 		Token: device.Token,
 	}
 
+	fmt.Println(message)
 	err := mp.amqp.PublishPersistentMessage(exchangeDevice, exchangeTypeDirect, routingKeyAuth, message, &options)
 	if err != nil {
 		return err
