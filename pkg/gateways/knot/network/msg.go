@@ -1,8 +1,6 @@
 package network
 
-import (
-	"github.com/janael-pinheiro/knot_go_sdk/pkg/entities"
-)
+import "github.com/janael-pinheiro/knot-cloud-sdk-golang/pkg/entities"
 
 type DeviceGenericMessage struct {
 	ID     string            `json:"id"`

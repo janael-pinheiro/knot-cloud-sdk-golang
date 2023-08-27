@@ -3,7 +3,7 @@ package network
 import (
 	"fmt"
 
-	"github.com/janael-pinheiro/knot_go_sdk/pkg/entities"
+	"github.com/janael-pinheiro/knot-cloud-sdk-golang/pkg/entities"
 )
 
 const (

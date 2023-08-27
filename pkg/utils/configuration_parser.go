@@ -4,7 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/janael-pinheiro/knot_go_sdk/pkg/entities"
+	"github.com/janael-pinheiro/knot-cloud-sdk-golang/pkg/entities"
 	"gopkg.in/yaml.v2"
 )
 

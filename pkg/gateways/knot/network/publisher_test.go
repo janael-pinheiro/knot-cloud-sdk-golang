@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/janael-pinheiro/knot_go_sdk/pkg/entities"
+	"github.com/janael-pinheiro/knot-cloud-sdk-golang/pkg/entities"
 	"github.com/stretchr/testify/assert"
 )
 

@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/janael-pinheiro/knot_go_sdk/pkg/entities"
-	"github.com/janael-pinheiro/knot_go_sdk/pkg/gateways/knot/network"
+	"github.com/janael-pinheiro/knot-cloud-sdk-golang/pkg/entities"
+	"github.com/janael-pinheiro/knot-cloud-sdk-golang/pkg/gateways/knot/network"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v2"
 )
@@ -512,6 +512,7 @@ func knotStateMachineHandler(pipeDevices chan map[string]entities.Device, device
 					if err != nil {
 						log.Errorln(err)
 					} else {
+						log.Println("Published data")
 						device.Data = nil
 						knotMutex.Lock()
 						err = p.updateDevice(device)

@@ -1,7 +1,7 @@
 package mocks
 
 import (
-	"github.com/janael-pinheiro/knot_go_sdk/pkg/gateways/knot/network"
+	"github.com/janael-pinheiro/knot-cloud-sdk-golang/pkg/gateways/knot/network"
 	"github.com/stretchr/testify/mock"
 )
 
