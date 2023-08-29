@@ -7,7 +7,7 @@ To use this client in your application, you need to import it:
 ```go
 import (
     "github.com/janael-pinheiro/knot-cloud-sdk-golang/pkg/entities"
-    "github.com/janael-pinheiro/knot_go_sdk/pkg/gateways/knot"
+    "github.com/janael-pinheiro/knot-cloud-sdk-golang/pkg/gateways/knot"
 )
 ```
 
