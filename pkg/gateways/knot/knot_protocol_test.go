@@ -399,8 +399,8 @@ type testCaseWithState struct {
 var testCasesWithState = []testCaseWithState{
 	{bidingKey: network.BindingKeyRegistered, expectedMessage: "received a registration response with a error", testName: "TestGivenBindingKeyRegisteredDeviceAlreadyRegisteredHandleKnotAMQP", errorMessage: "thing is already registered", state: entities.KnotAlreadyReg},
 	{bidingKey: network.BindingKeyUnregistered, expectedMessage: "received a unregistration response", testName: "TestGivenBindingKeyUnregisteredHandleKnotAMQP", errorMessage: "", state: entities.KnotForceDelete},
-	{bidingKey: network.ReplyToAuthMessages, expectedMessage: "received a authentication response with success", testName: "TestGivenReplyToAuthMessagesHandleWithoutErrorKnotAMQP", errorMessage: "", state: entities.KnotAuth},
-	{bidingKey: network.ReplyToAuthMessages, expectedMessage: "received a authentication response with a error", testName: "TestGivenReplyToAuthMessagesHandleWithoutErrorKnotAMQP", errorMessage: "testing error", state: entities.KnotForceDelete},
+	{bidingKey: network.REPLY_TO_AUTH_MESSAGES, expectedMessage: "received a authentication response with success", testName: "TestGivenReplyToAuthMessagesHandleWithoutErrorKnotAMQP", errorMessage: "", state: entities.KnotAuth},
+	{bidingKey: network.REPLY_TO_AUTH_MESSAGES, expectedMessage: "received a authentication response with a error", testName: "TestGivenReplyToAuthMessagesHandleWithoutErrorKnotAMQP", errorMessage: "testing error", state: entities.KnotForceDelete},
 	{bidingKey: network.BindingKeyUpdatedConfig, expectedMessage: "received a config update response with success", testName: "TestGivenBindingKeyUpdatedConfigWithoutErrorKnotAMQP", errorMessage: "", state: entities.KnotReady},
 }
 

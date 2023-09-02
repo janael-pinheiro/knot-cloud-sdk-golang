@@ -60,7 +60,7 @@ func NewBidingKeyActionMapping() bidingKeyActionMapping {
 	newBidingKeyActionMapping := make(bidingKeyActionMapping)
 	newBidingKeyActionMapping[network.BindingKeyRegistered] = bindingKeyRegistered
 	newBidingKeyActionMapping[network.BindingKeyUnregistered] = bindingKeyUnregistered
-	newBidingKeyActionMapping[network.ReplyToAuthMessages] = replyToAuthMessages
+	newBidingKeyActionMapping[network.REPLY_TO_AUTH_MESSAGES] = replyToAuthMessages
 	newBidingKeyActionMapping[network.BindingKeyUpdatedConfig] = bindingKeyUpdatedConfig
 
 	return newBidingKeyActionMapping

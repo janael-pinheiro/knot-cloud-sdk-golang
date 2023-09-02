@@ -26,19 +26,20 @@ type Messaging interface {
 }
 
 const (
-	exchangeTypeDirect  = "direct"
-	exchangeTypeFanout  = "fanout"
-	exchangeDevice      = "device"
-	exchangeSent        = "data.sent"
-	ReplyToAuthMessages = "sql-auth-rpc"
-	durable             = true
-	deleteWhenUnused    = false
-	exclusive           = false
-	noWait              = false
-	internal            = false
-	noAck               = true
-	noLocal             = false
-	consumerTag         = ""
+	EXCHANGE_TYPE_DIRECT   = "direct"
+	EXCHANGE_TYPE_FANOUT   = "fanout"
+	EXCHANGE_DEVICE        = "device"
+	EXCHANGE_SENT          = "data.sent"
+	REPLY_TO_AUTH_MESSAGES = "sql-auth-rpc"
+	DURABLE                = true
+	DELTE_WHEN_UNUSED      = false
+	EXCLUSIVE              = false
+	NO_WAIT                = false
+	INTERNAL               = false
+	NO_ACK                 = false
+	NO_LOCAL               = false
+	CONSUMER_TAG           = ""
+	MULTIPLE               = false
 )
 
 type AMQPHandler struct {
@@ -115,8 +116,8 @@ func (a *AMQPHandler) OnMessage(msgChan chan InMsg, queueName, exchangeName, exc
 		queueName,
 		key,
 		exchangeName,
-		noWait, // noWait
-		nil,    // arguments
+		NO_WAIT, // noWait
+		nil,     // arguments
 	)
 	if err != nil {
 		return err
@@ -124,11 +125,11 @@ func (a *AMQPHandler) OnMessage(msgChan chan InMsg, queueName, exchangeName, exc
 
 	deliveries, err := a.connection.consume(
 		queueName,
-		consumerTag,
-		noAck,
-		exclusive,
-		noLocal,
-		noWait,
+		CONSUMER_TAG,
+		NO_ACK,
+		EXCLUSIVE,
+		NO_LOCAL,
+		NO_WAIT,
 		nil, // arguments
 	)
 	if err != nil {
@@ -210,5 +211,6 @@ func (a *AMQPHandler) DeclareQueue(name string) error {
 func convertDeliveryToInMsg(deliveries <-chan amqp.Delivery, outMsg chan InMsg) {
 	for d := range deliveries {
 		outMsg <- InMsg{d.Exchange, d.RoutingKey, d.ReplyTo, d.CorrelationId, d.Headers, d.Body}
+		d.Ack(MULTIPLE)
 	}
 }

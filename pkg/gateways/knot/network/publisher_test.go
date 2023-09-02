@@ -36,7 +36,7 @@ func TestPublishDeviceRegister(t *testing.T) {
 	device := createFakeDevice("1", "test")
 	message := createFakeDeviceRegisterRequest(device.ID, device.Name)
 
-	amqpMock.On("PublishPersistentMessage", exchangeDevice, exchangeTypeDirect, routingKeyRegister, message, &options).Return(nil)
+	amqpMock.On("PublishPersistentMessage", EXCHANGE_DEVICE, EXCHANGE_TYPE_DIRECT, routingKeyRegister, message, &options).Return(nil)
 
 	publisher := NewMsgPublisher(amqpMock)
 	err := publisher.PublishDeviceRegister(userToken, &device)
@@ -51,7 +51,7 @@ func TestPublishDeviceRegisterWhenEmptyTokenReturnError(t *testing.T) {
 	device := createFakeDevice("1", "test")
 	message := createFakeDeviceRegisterRequest(device.ID, device.Name)
 
-	amqpMock.On("PublishPersistentMessage", exchangeDevice, exchangeTypeDirect, routingKeyRegister, message, &options).Return(errors.New("failed"))
+	amqpMock.On("PublishPersistentMessage", EXCHANGE_DEVICE, EXCHANGE_TYPE_DIRECT, routingKeyRegister, message, &options).Return(errors.New("failed"))
 
 	publisher := NewMsgPublisher(amqpMock)
 	err := publisher.PublishDeviceRegister(emptyUserToken, &device)
@@ -68,7 +68,7 @@ func TestPublishDeviceUnregister(t *testing.T) {
 		ID: device.ID,
 	}
 
-	amqpMock.On("PublishPersistentMessage", exchangeDevice, exchangeTypeDirect, routingKeyUnregister, message, &options).Return(nil)
+	amqpMock.On("PublishPersistentMessage", EXCHANGE_DEVICE, EXCHANGE_TYPE_DIRECT, routingKeyUnregister, message, &options).Return(nil)
 
 	publisher := NewMsgPublisher(amqpMock)
 	err := publisher.PublishDeviceUnregister(userToken, &device)
@@ -85,7 +85,7 @@ func TestPublishDeviceUnregisterWhenEmptyTokenReturnError(t *testing.T) {
 		ID: device.ID,
 	}
 
-	amqpMock.On("PublishPersistentMessage", exchangeDevice, exchangeTypeDirect, routingKeyUnregister, message, &options).Return(errors.New("failed"))
+	amqpMock.On("PublishPersistentMessage", EXCHANGE_DEVICE, EXCHANGE_TYPE_DIRECT, routingKeyUnregister, message, &options).Return(errors.New("failed"))
 
 	publisher := NewMsgPublisher(amqpMock)
 	err := publisher.PublishDeviceUnregister(userToken, &device)
@@ -100,7 +100,7 @@ func TestPublishDeviceAuth(t *testing.T) {
 		Authorization: userToken,
 		Expiration:    defaultExpirationTime,
 		CorrelationID: defaultCorrelationID,
-		ReplyTo:       ReplyToAuthMessages,
+		ReplyTo:       REPLY_TO_AUTH_MESSAGES,
 	}
 	device := createFakeDevice("1", "test")
 	message := DeviceAuthRequest{
@@ -108,7 +108,7 @@ func TestPublishDeviceAuth(t *testing.T) {
 		Token: device.Token,
 	}
 
-	amqpMock.On("PublishPersistentMessage", exchangeDevice, exchangeTypeDirect, routingKeyAuth, message, &options).Return(nil)
+	amqpMock.On("PublishPersistentMessage", EXCHANGE_DEVICE, EXCHANGE_TYPE_DIRECT, routingKeyAuth, message, &options).Return(nil)
 
 	publisher := NewMsgPublisher(amqpMock)
 	err := publisher.PublishDeviceAuth(userToken, &device)
@@ -129,7 +129,7 @@ func TestPublishDeviceUpdateConfig(t *testing.T) {
 		Config: device.Config,
 	}
 
-	amqpMock.On("PublishPersistentMessage", exchangeDevice, exchangeTypeDirect, routingKeyUpdateConfig, message, &options).Return(nil)
+	amqpMock.On("PublishPersistentMessage", EXCHANGE_DEVICE, EXCHANGE_TYPE_DIRECT, routingKeyUpdateConfig, message, &options).Return(nil)
 
 	publisher := NewMsgPublisher(amqpMock)
 	err := publisher.PublishDeviceUpdateConfig(userToken, &device)
@@ -151,7 +151,7 @@ func TestPublishDeviceData(t *testing.T) {
 		Data: data,
 	}
 
-	amqpMock.On("PublishPersistentMessage", exchangeSent, exchangeTypeFanout, "", message, &options).Return(nil)
+	amqpMock.On("PublishPersistentMessage", EXCHANGE_SENT, EXCHANGE_TYPE_FANOUT, "", message, &options).Return(nil)
 
 	publisher := NewMsgPublisher(amqpMock)
 	err := publisher.PublishDeviceData(userToken, &device, data)

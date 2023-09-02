@@ -28,10 +28,10 @@ func (ms *msgSubscriber) SubscribeToKNoTMessages(msgChan chan InMsg) error {
 		err = ms.amqp.OnMessage(msgChan, queue, exchange, kind, key)
 	}
 
-	subscribe(msgChan, queueName, exchangeDevice, exchangeTypeDirect, BindingKeyRegistered)
-	subscribe(msgChan, queueName, exchangeDevice, exchangeTypeDirect, BindingKeyUnregistered)
-	subscribe(msgChan, queueName, exchangeDevice, exchangeTypeDirect, ReplyToAuthMessages)
-	subscribe(msgChan, queueName, exchangeDevice, exchangeTypeDirect, BindingKeyUpdatedConfig)
+	subscribe(msgChan, queueName, EXCHANGE_DEVICE, EXCHANGE_TYPE_DIRECT, BindingKeyRegistered)
+	subscribe(msgChan, queueName, EXCHANGE_DEVICE, EXCHANGE_TYPE_DIRECT, BindingKeyUnregistered)
+	subscribe(msgChan, queueName, EXCHANGE_DEVICE, EXCHANGE_TYPE_DIRECT, REPLY_TO_AUTH_MESSAGES)
+	subscribe(msgChan, queueName, EXCHANGE_DEVICE, EXCHANGE_TYPE_DIRECT, BindingKeyUpdatedConfig)
 
 	return nil
 }

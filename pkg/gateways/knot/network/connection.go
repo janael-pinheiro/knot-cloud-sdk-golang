@@ -57,10 +57,10 @@ func (a *AmqpConnection) getChannel() *amqp.Channel {
 func (a *AmqpConnection) queueDeclare(name string) error {
 	queue, err := a.channel.QueueDeclare(
 		name,
-		durable,
-		deleteWhenUnused,
-		exclusive,
-		noWait,
+		DURABLE,
+		DELTE_WHEN_UNUSED,
+		EXCLUSIVE,
+		NO_WAIT,
 		nil, // arguments
 	)
 	if err == nil {
@@ -74,10 +74,10 @@ func (a *AmqpConnection) exchangeDeclare(name, exchangeType string) error {
 	return a.channel.ExchangeDeclare(
 		name,
 		exchangeType,
-		durable,
-		deleteWhenUnused,
-		internal,
-		noWait,
+		DURABLE,
+		DELTE_WHEN_UNUSED,
+		INTERNAL,
+		NO_WAIT,
 		nil, // arguments
 	)
 }

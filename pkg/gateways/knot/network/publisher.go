@@ -42,7 +42,7 @@ func (mp *msgPublisher) PublishDeviceRegister(userToken string, device *entities
 		Name: device.Name,
 	}
 
-	err := mp.amqp.PublishPersistentMessage(exchangeDevice, exchangeTypeDirect, routingKeyRegister, message, &options)
+	err := mp.amqp.PublishPersistentMessage(EXCHANGE_DEVICE, EXCHANGE_TYPE_DIRECT, routingKeyRegister, message, &options)
 	if err != nil {
 		return err
 	}
@@ -60,7 +60,7 @@ func (mp *msgPublisher) PublishDeviceUnregister(userToken string, device *entiti
 		ID: device.ID,
 	}
 
-	err := mp.amqp.PublishPersistentMessage(exchangeDevice, exchangeTypeDirect, routingKeyUnregister, message, &options)
+	err := mp.amqp.PublishPersistentMessage(EXCHANGE_DEVICE, EXCHANGE_TYPE_DIRECT, routingKeyUnregister, message, &options)
 	if err != nil {
 		return err
 	}
@@ -73,7 +73,7 @@ func (mp *msgPublisher) PublishDeviceAuth(userToken string, device *entities.Dev
 		Authorization: userToken,
 		Expiration:    defaultExpirationTime,
 		CorrelationID: defaultCorrelationID,
-		ReplyTo:       ReplyToAuthMessages,
+		ReplyTo:       REPLY_TO_AUTH_MESSAGES,
 	}
 
 	message := DeviceAuthRequest{
@@ -82,7 +82,7 @@ func (mp *msgPublisher) PublishDeviceAuth(userToken string, device *entities.Dev
 	}
 
 	fmt.Println(message)
-	err := mp.amqp.PublishPersistentMessage(exchangeDevice, exchangeTypeDirect, routingKeyAuth, message, &options)
+	err := mp.amqp.PublishPersistentMessage(EXCHANGE_DEVICE, EXCHANGE_TYPE_DIRECT, routingKeyAuth, message, &options)
 	if err != nil {
 		return err
 	}
@@ -101,7 +101,7 @@ func (mp *msgPublisher) PublishDeviceUpdateConfig(userToken string, device *enti
 		Config: device.Config,
 	}
 
-	err := mp.amqp.PublishPersistentMessage(exchangeDevice, exchangeTypeDirect, routingKeyUpdateConfig, message, &options)
+	err := mp.amqp.PublishPersistentMessage(EXCHANGE_DEVICE, EXCHANGE_TYPE_DIRECT, routingKeyUpdateConfig, message, &options)
 	if err != nil {
 		return err
 	}
@@ -120,7 +120,7 @@ func (mp *msgPublisher) PublishDeviceData(userToken string, device *entities.Dev
 		Data: data,
 	}
 
-	err := mp.amqp.PublishPersistentMessage(exchangeSent, exchangeTypeFanout, "", message, &options)
+	err := mp.amqp.PublishPersistentMessage(EXCHANGE_SENT, EXCHANGE_TYPE_FANOUT, "", message, &options)
 	if err != nil {
 		return err
 	}
