@@ -291,6 +291,7 @@ type deviceTimeoutSuite struct {
 }
 
 func (deviceSuite *deviceTimeoutSuite) SetupTest() {
+	os.Setenv("DEVICE_CONFIG_FILEPATH", "/tmp/device_config.yaml")
 	deviceConfiguration, knotConfiguration := loadConfiguration()
 	deviceSuite.deviceConfiguration = deviceConfiguration
 	pipeDevices, deviceChan := createChannels()
@@ -592,8 +593,10 @@ func (knot *requestKNotSuite) TestKnotStateMachineHandlerWhenCommunicationProble
 	for i := 1; i <= 10; i++ {
 		fakeData = append(fakeData, createData(i))
 	}
+	communicationErrorMessage := "Communication error"
 	knot.device.Data = fakeData
-	knot.publisherMock.On("PublishDeviceData").Return(errors.New("Communication error"))
+	knot.publisherMock.On("PublishDeviceData").Return(errors.New(communicationErrorMessage))
+	//knot.publisherMock.On("PublishDeviceAuth").Return(errors.New(communicationErrorMessage))
 
 	states := []string{entities.KnotPublishing}
 	<-knot.pipeDevices

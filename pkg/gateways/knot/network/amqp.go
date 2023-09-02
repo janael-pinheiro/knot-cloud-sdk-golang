@@ -1,6 +1,7 @@
 package network
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -8,6 +9,11 @@ import (
 	"github.com/cenkalti/backoff"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
+
+type exchanceProperty struct {
+	name         string
+	exchangeType string
+}
 
 type Messaging interface {
 	Start() error
@@ -70,7 +76,20 @@ func (a *AMQPHandler) Start() error {
 		return err
 	}
 	go a.notifyWhenClosed()
-	return nil
+	return setupExchanges(a)
+}
+
+func setupExchanges(a Messaging) error {
+	exchageProperties := make([]exchanceProperty, 2)
+	exchageProperties[0] = exchanceProperty{name: "device", exchangeType: "direct"}
+	exchageProperties[1] = exchanceProperty{name: "data.published", exchangeType: "fanout"}
+
+	var exchangeErrors []error
+	for _, exchange := range exchageProperties {
+		err := a.DeclareExchange(exchange.name, exchange.exchangeType)
+		exchangeErrors = append(exchangeErrors, err)
+	}
+	return errors.Join(exchangeErrors...)
 }
 
 func (a *AMQPHandler) Stop() error {
@@ -123,29 +142,12 @@ func (a *AMQPHandler) OnMessage(msgChan chan InMsg, queueName, exchangeName, exc
 
 func (a *AMQPHandler) PublishPersistentMessage(exchange, exchangeType, key string, data interface{}, options *MessageOptions) error {
 	//Reduces communication with the AMQP server by avoiding redeclaring an exchage of the same type.
-	if !a.exchangeAlreadyDeclared(exchange) {
-		err := a.DeclareExchange(exchange, exchangeType)
-		if err != nil {
-			return fmt.Errorf("error declaring exchange: %w", err)
-		} else {
-			exchangeLock.Lock()
-			a.declaredExchanges[exchange] = struct{}{}
-			exchangeLock.Unlock()
-		}
-	}
 	err := a.connection.publish(exchange, key, false, false, data, options)
 	if err != nil {
 		return fmt.Errorf("error publishing message in channel: %w", err)
 	}
 
 	return nil
-}
-
-func (a *AMQPHandler) exchangeAlreadyDeclared(exchangeName string) bool {
-	exchangeLock.Lock()
-	_, ok := a.declaredExchanges[exchangeName]
-	exchangeLock.Unlock()
-	return ok
 }
 
 func (a *AMQPHandler) notifyWhenClosed() {

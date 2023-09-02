@@ -449,6 +449,7 @@ func (p *protocol) requestsKnot(deviceChan chan entities.Device, device entities
 func knotStateMachineHandler(pipeDevices chan map[string]entities.Device, deviceChan chan entities.Device, p *protocol, log *logrus.Entry) {
 
 	pipeDevices <- p.devices
+	newState := setupStateChain(p, deviceChan, log, pipeDevices)
 	for device := range deviceChan {
 		if !p.deviceExists(device) {
 			if device.ID == "" {
@@ -482,109 +483,48 @@ func knotStateMachineHandler(pipeDevices chan map[string]entities.Device, device
 				device.Error = ""
 			}
 
-			switch device.State {
-
-			// If the device status is new, request a device registration
-			case entities.KnotNew:
-
-				p.requestsKnot(deviceChan, device, device.State, entities.KnotWaitReg, registerRequestMessage, log)
-
-			// If the device is already registered, ask for device authentication
-			case entities.KnotRegistered:
-
-				p.requestsKnot(deviceChan, device, device.State, entities.KnotWaitAuth, "send a auth request", log)
-
-			// The device has a token and authentication was successful.
-			case entities.KnotAuth:
-
-				p.requestsKnot(deviceChan, device, device.State, entities.KnotWaitConfig, "send a updateconfig request", log)
-
-			//everything is ok with knot device
-			case entities.KnotReady:
-				device.State = entities.KnotPublishing
-				knotMutex.Lock()
-				err := p.updateDevice(device)
-				knotMutex.Unlock()
-				if err != nil {
-					log.Errorln(err)
-				} else {
-					go updateDeviceMap(pipeDevices, p.devices)
-				}
-			// Send the new data that comes from the device to Knot Cloud
-			case entities.KnotPublishing:
-				err := p.checkData(device)
-				if err == nil {
-					err := p.network.publisher.PublishDeviceData(p.userToken, &device, device.Data)
-					if err != nil {
-						log.Errorln(err)
-					} else {
-						log.Println("Published data")
-						device.Data = nil
-						knotMutex.Lock()
-						err = p.updateDevice(device)
-						knotMutex.Unlock()
-						verifyErrors(err, log)
-					}
-				} else {
-					log.Println("invalid data, has no data to send")
-				}
-
-			// If the device is already registered, ask for device authentication
-			case entities.KnotAlreadyReg:
-
-				var err error
-				if device.Token == "" {
-					knotMutex.Lock()
-					device.ID, err = p.generateID(pipeDevices, device)
-					knotMutex.Unlock()
-					if err != nil {
-						log.Error(err)
-					} else {
-						p.requestsKnot(deviceChan, device, entities.KnotNew, entities.KnotWaitReg, registerRequestMessage, log)
-					}
-				} else {
-
-					p.requestsKnot(deviceChan, device, entities.KnotRegistered, entities.KnotWaitAuth, "send a Auth request", log)
-
-				}
-
-			// Just delete
-			case entities.KnotForceDelete:
-				var err error
-				log.Println("delete a device")
-				knotMutex.Lock()
-				device.ID, err = p.generateID(pipeDevices, device)
-				knotMutex.Unlock()
-				if err != nil {
-					log.Error(err)
-				} else {
-					p.requestsKnot(deviceChan, device, entities.KnotNew, entities.KnotWaitReg, registerRequestMessage, log)
-				}
-
-			// Handle errors
-			case entities.KnotError:
-				log.Println("ERROR: ")
-				switch device.Error {
-				case "thing's config not provided":
-					log.Println("thing's config not provided")
-
-				default:
-					log.Println("ERROR WITHOUT HANDLER" + device.Error)
-
-				}
-				device.State = entities.KnotNew
-				device.Error = ""
-				knotMutex.Lock()
-				err := p.updateDevice(device)
-				knotMutex.Unlock()
-				verifyErrors(err, log)
-
-			// ignore the device
-			case entities.KnotOff:
-
-			}
+			newState.execute(device)
 		}
 	}
+}
+
+func setupStateChain(protocol *protocol, deviceChan chan entities.Device, log *logrus.Entry, pipeDevices chan map[string]entities.Device) stateHandler {
+	baseState := baseState{
+		p:           protocol,
+		deviceChan:  deviceChan,
+		log:         log,
+		pipeDevices: pipeDevices,
+	}
+	newState := new(newStateHandler)
+	newState.baseState = baseState
+	registered := new(registeredStateHandler)
+	registered.baseState = baseState
+	auth := new(authStateHandler)
+	auth.baseState = baseState
+	ready := new(readyStateHandler)
+	ready.baseState = baseState
+	publishing := new(publishingStateHandler)
+	publishing.baseState = baseState
+	alreadyReg := new(alreadyRegStateHandler)
+	alreadyReg.baseState = baseState
+	forceDelete := new(forceDeleteStateHandler)
+	forceDelete.baseState = baseState
+	errorState := new(errorStateHandler)
+	errorState.baseState = baseState
+	knotOff := new(knotOffStateHandler)
+	knotOff.baseState = baseState
+
+	//Define the chain
+	newState.setNext(registered)
+	registered.setNext(auth)
+	auth.setNext(ready)
+	ready.setNext(publishing)
+	publishing.setNext(alreadyReg)
+	alreadyReg.setNext(forceDelete)
+	forceDelete.setNext(errorState)
+	errorState.setNext(knotOff)
+
+	return newState
 }
 
 func (p *protocol) checkTimeout(device entities.Device, log *logrus.Entry) entities.Device {

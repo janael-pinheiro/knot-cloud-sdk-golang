@@ -75,8 +75,19 @@ func TestCreateAMQPConnection(t *testing.T) {
 	connectionMock := new(connectionMock)
 	connectionMock.On("connect").Return(nil)
 	connectionMock.On("createChannel").Return(nil)
+	connectionMock.On("exchangeDeclare", "device", "direct").Return(nil)
+	connectionMock.On("exchangeDeclare", "data.published", "fanout").Return(nil)
 	amqp := NewAMQPHandler(connectionMock)
 	err := amqp.Start()
+	assert.Nil(t, err)
+}
+
+func TestSetupExchanges(t *testing.T) {
+	connectionMock := new(connectionMock)
+	connectionMock.On("exchangeDeclare", "device", "direct").Return(nil)
+	connectionMock.On("exchangeDeclare", "data.published", "fanout").Return(nil)
+	amqp := NewAMQPHandler(connectionMock)
+	err := setupExchanges(amqp)
 	assert.Nil(t, err)
 }
 
