@@ -30,7 +30,7 @@ type Protocol interface {
 	writeDevicesConfigFile(device entities.Device) error
 }
 type networkWrapper struct {
-	amqp       network.Messaging
+	amqp       []network.Messaging
 	publisher  network.Publisher
 	subscriber network.Subscriber
 }
@@ -121,13 +121,15 @@ func bindingKeyUpdatedConfig(message network.InMsg, deviceChan chan entities.Dev
 	}
 }
 
-func newProtocol(pipeDevices chan map[string]entities.Device, conf entities.IntegrationKNoTConfig, deviceChan chan entities.Device, msgChan chan network.InMsg, log *logrus.Entry, devices map[string]entities.Device, publisher network.Publisher, subscriber network.Subscriber, amqp network.Messaging, fileManagement filesystemManagement) (Protocol, error) {
+func newProtocol(pipeDevices chan map[string]entities.Device, conf entities.IntegrationKNoTConfig, deviceChan chan entities.Device, msgChan chan network.InMsg, log *logrus.Entry, devices map[string]entities.Device, publisher network.Publisher, subscriber network.Subscriber, amqpPublisher network.Messaging, amqpSubscriber network.Messaging, fileManagement filesystemManagement) (Protocol, error) {
 	p := &protocol{}
 
 	p.fileManagement = fileManagement
 	p.userToken = conf.UserToken
 	p.network = new(networkWrapper)
-	p.network.amqp = amqp
+	p.network.amqp = make([]network.Messaging, 2)
+	p.network.amqp[0] = amqpPublisher
+	p.network.amqp[1] = amqpSubscriber
 	p.network.publisher = publisher
 	p.network.subscriber = subscriber
 
@@ -315,7 +317,11 @@ func (p *protocol) writeDevicesConfigFile(device entities.Device) error {
 }
 
 func (p *protocol) Close() error {
-	return p.network.amqp.Stop()
+	var amqpErrors []error
+	for _, amqpManager := range p.network.amqp {
+		amqpErrors = append(amqpErrors, amqpManager.Stop())
+	}
+	return errors.Join(amqpErrors...)
 }
 
 func (p *protocol) createDevice(device entities.Device) error {

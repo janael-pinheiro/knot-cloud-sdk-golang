@@ -1,6 +1,10 @@
 package network
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
 
 func TestSubscribeToKNoTMessages(t *testing.T) {
 	amqpMock := new(AmqpMock)
@@ -10,7 +14,8 @@ func TestSubscribeToKNoTMessages(t *testing.T) {
 	amqpMock.On("OnMessage", msgChan, queueName, exchangeDevice, exchangeTypeDirect, ReplyToAuthMessages).Return(nil)
 	amqpMock.On("OnMessage", msgChan, queueName, exchangeDevice, exchangeTypeDirect, BindingKeyUpdatedConfig).Return(nil)
 	subscriber := NewMsgSubscriber(amqpMock)
-	subscriber.SubscribeToKNoTMessages(msgChan)
+	err := subscriber.SubscribeToKNoTMessages(msgChan)
+	assert.NoError(t, err)
 	amqpMock.AssertExpectations(t)
 }
 

@@ -152,7 +152,8 @@ func TestClose(t *testing.T) {
 	amqpMock := new(network.AmqpMock)
 	amqpMock.On("Stop", msgChan).Return(nil)
 	net := new(networkWrapper)
-	net.amqp = amqpMock
+	net.amqp = make([]network.Messaging, 1)
+	net.amqp[0] = amqpMock
 	protocol := protocol{
 		network: net,
 	}

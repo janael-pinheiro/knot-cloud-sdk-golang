@@ -227,10 +227,6 @@ func TestTokenIDGenerator(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func sendDeviceToChannel(device entities.Device, channel chan entities.Device) {
-	channel <- device
-}
-
 func createChannels() (chan map[string]entities.Device, chan entities.Device) {
 	pipeDevices := make(chan map[string]entities.Device)
 	deviceChannel := make(chan entities.Device)
@@ -267,11 +263,12 @@ func TestGivenInvalidConfigTimeout(t *testing.T) {
 	go func() {
 		publisherMock := new(mocks.PublisherMock)
 		subscriberMock := new(mocks.SubscriberMock)
-		amqpMock := new(network.AmqpMock)
+		amqpPublisherMock := new(network.AmqpMock)
+		amqpSubscriberMock := new(network.AmqpMock)
 		subscriberMock.On("SubscribeToKNoTMessages", msgChan).Return(nil)
 		fileManagementMock := new(fileManagementMock)
 		fileManagementMock.On("writeDevicesConfigFile").Return(nil)
-		_, err = newProtocol(pipeDevices, conf, deviceChan, msgChan, logger, devices, publisherMock, subscriberMock, amqpMock, fileManagementMock)
+		_, err = newProtocol(pipeDevices, conf, deviceChan, msgChan, logger, devices, publisherMock, subscriberMock, amqpPublisherMock, amqpSubscriberMock, fileManagementMock)
 	}()
 
 	timeout := time.Second * 30
@@ -301,11 +298,12 @@ func (deviceSuite *deviceTimeoutSuite) SetupTest() {
 	msgChan := make(chan network.InMsg)
 	publisherMock := new(mocks.PublisherMock)
 	subscriberMock := new(mocks.SubscriberMock)
-	amqpMock := new(network.AmqpMock)
+	amqpPublisherMock := new(network.AmqpMock)
+	amqpSubscriberMock := new(network.AmqpMock)
 	subscriberMock.On("SubscribeToKNoTMessages", msgChan).Return(nil)
 	fileManagementMock := new(fileManagementMock)
 	fileManagementMock.On("writeDevicesConfigFile").Return(nil)
-	deviceSuite.protocol, _ = newProtocol(pipeDevices, knotConfiguration, deviceChan, msgChan, deviceSuite.logger, deviceConfiguration, publisherMock, subscriberMock, amqpMock, fileManagementMock)
+	deviceSuite.protocol, _ = newProtocol(pipeDevices, knotConfiguration, deviceChan, msgChan, deviceSuite.logger, deviceConfiguration, publisherMock, subscriberMock, amqpPublisherMock, amqpSubscriberMock, fileManagementMock)
 	deviceSuite.device = deviceConfiguration["2801d924dcf1fc52"]
 	deviceSuite.device.Error = errorTimeoutMessage
 }
@@ -539,11 +537,12 @@ func (knot *requestKNotSuite) SetupTest() {
 	msgChan := make(chan network.InMsg)
 	knot.publisherMock = new(mocks.PublisherMock)
 	subscriberMock := new(mocks.SubscriberMock)
-	amqpMock := new(network.AmqpMock)
+	amqpPublisherMock := new(network.AmqpMock)
+	amqpSubscriberMock := new(network.AmqpMock)
 	fileManagementMock := new(fileManagementMock)
 	subscriberMock.On("SubscribeToKNoTMessages", msgChan).Return(nil)
 	fileManagementMock.On("writeDevicesConfigFile").Return(nil)
-	knot.protocol, _ = newProtocol(knot.pipeDevices, knotConfiguration, deviceChan, msgChan, knot.logger, deviceConfiguration, knot.publisherMock, subscriberMock, amqpMock, fileManagementMock)
+	knot.protocol, _ = newProtocol(knot.pipeDevices, knotConfiguration, deviceChan, msgChan, knot.logger, deviceConfiguration, knot.publisherMock, subscriberMock, amqpPublisherMock, amqpSubscriberMock, fileManagementMock)
 	knot.device = deviceConfiguration[deviceID]
 	var fakeConfig []entities.Config
 	for i := 1; i <= 10; i++ {
@@ -616,14 +615,15 @@ func TestRequestKNotSuite(t *testing.T) {
 
 type knotStateDeviceEmptyTokenSuite struct {
 	suite.Suite
-	hook          *test.Hook
-	fakeDevice    entities.Device
-	logger        *logrus.Entry
-	publisherMock *mocks.PublisherMock
-	deviceChan    chan entities.Device
-	pipeDevices   chan map[string]entities.Device
-	amqpMock      *network.AmqpMock
-	protocol      Protocol
+	hook               *test.Hook
+	fakeDevice         entities.Device
+	logger             *logrus.Entry
+	publisherMock      *mocks.PublisherMock
+	deviceChan         chan entities.Device
+	pipeDevices        chan map[string]entities.Device
+	amqpPublisherMock  *network.AmqpMock
+	amqpSubscriberMock *network.AmqpMock
+	protocol           Protocol
 }
 
 func (knotSuite *knotStateDeviceEmptyTokenSuite) SetupTest() {
@@ -638,13 +638,14 @@ func (knotSuite *knotStateDeviceEmptyTokenSuite) SetupTest() {
 	msgChan := make(chan network.InMsg)
 	knotSuite.publisherMock = new(mocks.PublisherMock)
 	subscriberMock := new(mocks.SubscriberMock)
-	knotSuite.amqpMock = new(network.AmqpMock)
+	knotSuite.amqpPublisherMock = new(network.AmqpMock)
+	knotSuite.amqpSubscriberMock = new(network.AmqpMock)
 	knotSuite.publisherMock.On("PublishDeviceRegister").Return(nil)
 	subscriberMock.On("SubscribeToKNoTMessages", msgChan).Return(nil)
 	fileManagementMock := new(fileManagementMock)
 	fileManagementMock.On("writeDevicesConfigFile").Return(nil)
 	var err error
-	knotSuite.protocol, err = newProtocol(knotSuite.pipeDevices, knotConfiguration, knotSuite.deviceChan, msgChan, knotSuite.logger, deviceConfiguration, knotSuite.publisherMock, subscriberMock, knotSuite.amqpMock, fileManagementMock)
+	knotSuite.protocol, err = newProtocol(knotSuite.pipeDevices, knotConfiguration, knotSuite.deviceChan, msgChan, knotSuite.logger, deviceConfiguration, knotSuite.publisherMock, subscriberMock, knotSuite.amqpPublisherMock, knotSuite.amqpSubscriberMock, fileManagementMock)
 
 	assert.NoError(knotSuite.T(), err)
 	knotSuite.fakeDevice = deviceConfiguration[deviceID]
@@ -727,7 +728,8 @@ func (knotSuite *knotStateDeviceEmptyTokenSuite) TestKnotStateMachineHandlerErro
 }
 
 func (knotSuite *knotStateDeviceEmptyTokenSuite) TestClose() {
-	knotSuite.amqpMock.On("Stop").Return(nil)
+	knotSuite.amqpPublisherMock.On("Stop").Return(nil)
+	knotSuite.amqpSubscriberMock.On("Stop").Return(nil)
 	err := knotSuite.protocol.Close()
 	assert.Nil(knotSuite.T(), err)
 }
@@ -748,11 +750,12 @@ func TestNewProtocolWhenSubscribeToKNoTMessagesErrorReturnErrorMessage(t *testin
 	msgChan := make(chan network.InMsg)
 	publisherMock := new(mocks.PublisherMock)
 	subscriberMock := new(mocks.SubscriberMock)
-	amqpMock := new(network.AmqpMock)
+	amqpPublisherMock := new(network.AmqpMock)
+	amqpSubscriberMock := new(network.AmqpMock)
 	errorToSubscribeMessage := "errorToSubscriber"
 	subscriberMock.On("SubscribeToKNoTMessages", msgChan).Return(errors.New(errorToSubscribeMessage))
 	fileManagementMock := new(fileManagementMock)
 	fileManagementMock.On("writeDevicesConfigFile").Return(nil)
-	_, err := newProtocol(pipeDevices, knotConfiguration, deviceChan, msgChan, logger, deviceConfiguration, publisherMock, subscriberMock, amqpMock, fileManagementMock)
+	_, err := newProtocol(pipeDevices, knotConfiguration, deviceChan, msgChan, logger, deviceConfiguration, publisherMock, subscriberMock, amqpPublisherMock, amqpSubscriberMock, fileManagementMock)
 	assert.ErrorContains(t, err, errorToSubscribeMessage)
 }

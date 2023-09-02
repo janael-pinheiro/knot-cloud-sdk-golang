@@ -40,19 +40,22 @@ var duplicationFilterFunctionMapping map[string]func(string, int, string) bool =
 
 func NewKNoTIntegration(pipeDevices chan map[string]entities.Device, conf entities.IntegrationKNoTConfig, log *logrus.Entry, devices map[string]entities.Device) (*Integration, error) {
 	var err error
-	KNoTInteration := Integration{}
+
 	amqpConnection := network.NewAmqpConnection(conf.URL)
-	amqp := network.NewAMQPHandler(amqpConnection)
-	err = amqp.Start()
-	if err != nil {
+	amqpPublisher := network.NewAMQPHandler(amqpConnection)
+	publisherErr := amqpPublisher.Start()
+	amqpSubscriber := network.NewAMQPHandler(amqpConnection)
+	subscriberErr := amqpSubscriber.Start()
+	if publisherErr != nil || subscriberErr != nil {
 		log.Println("KNoT connection error")
 	} else {
 		log.Println("KNoT connected")
 	}
-	publisher := network.NewMsgPublisher(amqp)
-	subscriber := network.NewMsgSubscriber(amqp)
+	publisher := network.NewMsgPublisher(amqpPublisher)
+	subscriber := network.NewMsgSubscriber(amqpPublisher)
 	fileManagement := new(fileManagement)
-	KNoTInteration.protocol, err = newProtocol(pipeDevices, conf, deviceChan, msgChan, log, devices, publisher, subscriber, amqp, fileManagement)
+	KNoTInteration := Integration{}
+	KNoTInteration.protocol, err = newProtocol(pipeDevices, conf, deviceChan, msgChan, log, devices, publisher, subscriber, amqpPublisher, amqpSubscriber, fileManagement)
 	if err != nil {
 		return nil, errors.Wrap(err, "new knot protocol")
 	}

@@ -1,6 +1,7 @@
 package network
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -113,7 +114,8 @@ func (a *AmqpConnection) publish(exchange string, key string, mandatory bool, im
 		return fmt.Errorf("error enconding JSON message: %w", err)
 	}
 
-	return a.channel.Publish(
+	return a.channel.PublishWithContext(
+		context.Background(),
 		exchange,
 		key,
 		mandatory,

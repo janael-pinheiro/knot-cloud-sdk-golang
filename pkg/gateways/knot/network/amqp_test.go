@@ -4,24 +4,13 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/cenkalti/backoff"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
 
-func retryFunctionMock(o backoff.Operation, b backoff.BackOff) error { return nil }
-
-func dialFunctionMock(url string) (*amqp.Connection, error) {
-	return nil, nil
-}
-
 type connectionMock struct {
 	mock.Mock
-}
-
-type channelMock struct {
-	amqp.Channel
 }
 
 func (c *connectionMock) connect() error {
