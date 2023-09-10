@@ -762,3 +762,34 @@ func TestNewProtocolWhenSubscribeToKNoTMessagesErrorReturnErrorMessage(t *testin
 	_, err := newProtocol(pipeDevices, knotConfiguration, deviceChan, msgChan, logger, deviceConfiguration, publisherMock, subscriberMock, amqpPublisherMock, amqpSubscriberMock, fileManagementMock)
 	assert.ErrorContains(t, err, errorToSubscribeMessage)
 }
+
+func BenchmarkCheckDeviceConfiguration(b *testing.B) {
+	device := setUp()
+
+	var fakeConfig []entities.Config
+	for i := 1; i <= 10; i++ {
+		fakeConfig = append(fakeConfig, createConfig(i))
+	}
+	device.Config = fakeConfig
+	protocol := protocol{
+		devices: make(map[string]entities.Device),
+	}
+	for i := 0; i < b.N; i++ {
+		protocol.checkDeviceConfiguration(device)
+	}
+}
+
+func BenchmarkCheckData(b *testing.B) {
+	device := setUp()
+	var fakeData []entities.Data
+	for i := 1; i <= 10; i++ {
+		fakeData = append(fakeData, createData(i))
+	}
+	device.Data = fakeData
+	protocol := protocol{
+		devices: make(map[string]entities.Device),
+	}
+	for i := 0; i < b.N; i++ {
+		protocol.checkData(device)
+	}
+}

@@ -84,3 +84,8 @@ The DEVICE_CONFIG_FILEPATH environment variable must be set to the path of the f
 $ go test -coverprofile cover.out ./...
 $ go tool cover -html=cover.out -o cover.html
 ```
+
+## Benchmarks
+```sh
+$ go test -bench=. -count 10 -run=^# ./...
+```
